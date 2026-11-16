@@ -7,7 +7,7 @@ description: Use when a pull request's work is committed and must be verified, r
 
 In order. Each step is done when its result is recorded for the report.
 
-1. **Changed flow.** If the change touches behaviour a person or agent uses, invoke `live-check` to exercise it in the browser or the live API. Ask the orchestrator for a lane if you have none.
+1. **Changed flow.** If the change touches behaviour a person or agent uses, invoke `live-check` to exercise it in the browser or the live API. A change with no flow to show still needs evidence: for docs, every link resolves and each claim is true at the head; for tooling, CI or baselines, the check's output before and after; for code no one can reach yet, the spec that drives it, red before and green after. Ask the orchestrator for a lane if you have none.
 2. **Review.** The review is independent of the change and covers its test evidence.
    - **Self-review:** invoke `code-review` against the base, with the brief as the spec, and fix what it finds in scope.
    - **The gate's review** (`gate.run`) answers `docs.review_checklist`.

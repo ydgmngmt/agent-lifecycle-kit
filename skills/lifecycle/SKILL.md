@@ -42,6 +42,14 @@ The diagram is [docs/adlc.png](../../docs/adlc.png). The project's values (doc p
    - **Disposition:** a failed exit criterion blocks the phase. Other findings are tracked as follow-up PRs and don't block. Each bug found live adds a regression check.
    - Once the exit criteria pass, the next phase starts.
 
+## What enforces the gates
+
+Say plainly which gate the host enforces and which holds only by convention; never call a gate enforced without having checked the host's settings.
+- **Host-enforced, where the plan allows it:** required status checks and "up to date with main" on the default branch (ruleset or branch protection), a merge queue, no force-push or deletion. A rule that admins may bypass doesn't enforce anything when agents use an admin's token.
+- **By convention:** the commit check, the live check, the review, owner approval of protected files, the phase run and the phase exit. The skills and the orchestrator hold these; the gate tool and the phase record leave evidence of them.
+
+The project file records which is which (`ci.enforcement`).
+
 ## Testing strategy
 
 - Browser E2E runs are the primary way to find bugs.

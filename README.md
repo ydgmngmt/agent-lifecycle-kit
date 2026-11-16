@@ -44,7 +44,7 @@ The `lifecycle` skill holds the full map of steps, roles and skills.
 | `skills/review-*`, `skills/{duplication,dead-code}-check` | Phase-review dimensions and quality checks |
 | `skills/bootstrap` | A guided, resumable readiness check that takes a repository to ready (`checklist.md`) |
 | `bin/lc-spawn`, `lc-close`, `lc-view` | Start, close and watch agent sessions in tmux |
-| `templates/` | `project.yaml`, lifecycle, roadmap, acceptance criteria, testing, phase exit, brief, watchdog prompt and running log, CI profiles |
+| `templates/` | `project.yaml`, lifecycle, roadmap, acceptance criteria, testing, phase exit, brief, watchdog prompt and running log, CI for the pr, nightly and phase profiles |
 | `docs/adlc.png` | The diagram |
 
 The step and role skills invoke the [mattpocock-skills](https://github.com/mattpocock/skills) set (`grilling`, `domain-modeling`, `research`, `prototype`, `codebase-design`, `tdd`, `diagnosing-bugs`, `code-review`, `pr`, `writing-for-agents`). Install it alongside this kit.

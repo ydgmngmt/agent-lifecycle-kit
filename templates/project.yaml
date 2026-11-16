@@ -37,6 +37,8 @@ checks:
 
 ci:
   pr_checks: [<required check names>]     # an empty list is never success
+  phase_workflow: <workflow file of the phase run, if CI has one>   # templates/ci/phase.yml
+  enforcement: <host settings that enforce the gates, or none (by convention only)>
 
 gate:
   run: <gate command, intent from a file>
