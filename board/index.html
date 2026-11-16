@@ -6,138 +6,223 @@
 <title>ADLC board</title>
 <style>
   :root {
-    --bg: #f6f7f4; --panel: #ffffff; --line: #dfe5df; --ink: #17302a; --muted: #5d6f69;
-    --green: #1f7a55; --green-bg: #e3f3ea; --red: #b3372f; --red-bg: #fbe6e3;
-    --amber: #9a6a00; --amber-bg: #fbf0d3; --blue: #2f5fa8; --blue-bg: #e4ecf8; --grey-bg: #edf0ed;
+    --page: #f4f6f2; --panel: #ffffff; --line: #e1e4dc; --ink: #10231e; --ink2: #4d5b56; --muted: #7f8a85;
+    --brand: #173d33; --track: #e9ece6;
+    --done: #0ca30c; --prog: #2a78d6; --warn: #fab219; --crit: #d03b3b;
+    --shadow: 0 1px 2px rgba(16, 35, 30, .06), 0 6px 18px rgba(16, 35, 30, .05);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #111715; --panel: #18211e; --line: #2a3632; --ink: #e4ede9; --muted: #92a39d;
-      --green: #6fd3a3; --green-bg: #17382b; --red: #ff9186; --red-bg: #43201d;
-      --amber: #f0c462; --amber-bg: #3d3115; --blue: #92b7f2; --blue-bg: #1b2b45; --grey-bg: #222c29;
+      --page: #0d1110; --panel: #171c1a; --line: #29302d; --ink: #eef2ef; --ink2: #bcc6c1; --muted: #87928d;
+      --brand: #9fe0c4; --track: #252c29; --prog: #3987e5; --shadow: none;
     }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, "Segoe UI", sans-serif; }
-  main { max-width: 1280px; margin: 0 auto; padding: 20px 16px 60px; }
-  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 14px; }
-  h1 { font-size: 22px; margin: 0; }
-  h2 { font-size: 17px; margin: 0 0 8px; }
-  h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-  .muted { color: var(--muted); }
-  .small { font-size: 13px; }
-  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
-  .wide { grid-column: 1 / -1; }
-  .row { display: flex; gap: 8px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--line); }
-  .row:first-of-type { border-top: 0; }
-  .row > .grow { flex: 1; min-width: 0; }
-  .badge { flex: none; display: inline-block; min-width: 86px; text-align: center; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--grey-bg); color: var(--muted); }
-  .done, .green, .MERGED { background: var(--green-bg); color: var(--green); }
-  .red, .failed, .blocked { background: var(--red-bg); color: var(--red); }
-  .running, .progress, .working { background: var(--blue-bg); color: var(--blue); }
-  .owner, .waiting, .limit, .review { background: var(--amber-bg); color: var(--amber); }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.45 "Inter", system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 1360px; margin: 0 auto; padding: 22px 16px 70px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin-bottom: 16px; }
+  h1 { font-size: 24px; margin: 0; letter-spacing: -.01em; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  h3 { font-size: 12px; margin: 0 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
   a { color: inherit; }
-  .bar { height: 8px; border-radius: 999px; background: var(--grey-bg); overflow: hidden; margin: 6px 0 2px; }
-  .bar > i { display: block; height: 100%; background: var(--green); }
-  .question { border: 2px solid var(--amber); }
-  .option { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; margin: 6px 0; cursor: pointer; }
+  .muted { color: var(--muted); } .ink2 { color: var(--ink2); } .small { font-size: 13px; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(12, minmax(0, 1fr)); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; box-shadow: var(--shadow); grid-column: span 12; min-width: 0; }
+  .s3 { grid-column: span 3; } .s4 { grid-column: span 4; } .s6 { grid-column: span 6; } .s8 { grid-column: span 8; }
+  @media (max-width: 1000px) { .s3 { grid-column: span 6; } .s4, .s6, .s8 { grid-column: span 12; } }
+  @media (max-width: 560px) { .s3 { grid-column: span 12; } }
+
+  /* KPI tiles */
+  .kpi { display: flex; flex-direction: column; gap: 2px; }
+  .kpi .num { font-size: 38px; font-weight: 700; letter-spacing: -.02em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+  .kpi .unit { font-size: 18px; font-weight: 600; color: var(--ink2); }
+  .hero { display: flex; gap: 18px; align-items: center; }
+  .ring text { font-weight: 700; font-size: 26px; fill: var(--ink); font-variant-numeric: tabular-nums; }
+
+  /* status marks: a coloured dot or segment plus a label, never colour alone */
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--track); margin-right: 6px; flex: none; }
+  .dot.done { background: var(--done); } .dot.progress, .dot.running, .dot.working { background: var(--prog); }
+  .dot.owner, .dot.limit, .dot.hold, .dot.unverified, .dot.closed { background: var(--warn); } .dot.red, .dot.blocked, .dot.failed { background: var(--crit); }
+  .tag { display: inline-flex; align-items: center; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--ink2); min-width: 96px; flex: none; }
+  .seg { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; background: var(--track); }
+  .seg i { display: block; height: 100%; } .seg .done { background: var(--done); } .seg .progress { background: var(--prog); }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; font-size: 12px; color: var(--ink2); }
+
+  /* roadmap strip */
+  .road { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+  .step { flex: 1 0 96px; border-top: 5px solid var(--track); padding: 8px 4px 0; min-width: 0; }
+  .step.done { border-color: var(--done); } .step.current { border-color: var(--prog); }
+  .step.hold, .step.unverified, .step.closed { border-color: var(--warn); }
+  .step b { display: block; font-size: 14px; } .step span { font-size: 12px; color: var(--muted); }
+  .step.current b { font-size: 15px; }
+
+  .row { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .grow { flex: 1; min-width: 0; } .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip { font-size: 12px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink2); }
+  .cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+
+  .chart { position: relative; }
+  .chart svg { width: 100%; height: 150px; display: block; }
+  .tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--panel); font-size: 12px; padding: 4px 8px; border-radius: 6px; transform: translate(-50%, -110%); white-space: nowrap; display: none; }
+
+  .question { border: 2px solid var(--warn); }
+  .option { display: flex; gap: 8px; align-items: flex-start; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; margin: 6px 0; cursor: pointer; }
   .option input { margin-top: 4px; }
-  textarea { width: 100%; min-height: 54px; margin-top: 6px; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; }
-  button { margin-top: 8px; padding: 7px 16px; border-radius: 8px; border: 0; background: var(--ink); color: var(--bg); font: inherit; font-weight: 600; cursor: pointer; }
-  .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  details > summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 8px; }
+  textarea { width: 100%; min-height: 54px; margin-top: 6px; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--page); color: var(--ink); font: inherit; }
+  button { margin-top: 8px; padding: 8px 18px; border-radius: 8px; border: 0; background: var(--brand); color: var(--panel); font: inherit; font-weight: 600; cursor: pointer; }
+  details > summary { cursor: pointer; color: var(--ink2); font-size: 13px; font-weight: 600; }
+  table { border-collapse: collapse; font-size: 13px; margin-top: 8px; } td, th { padding: 2px 12px 2px 0; text-align: left; }
 </style>
 </head>
 <body>
 <main>
   <header>
     <h1>ADLC board</h1>
-    <span class="muted" id="project"></span>
+    <span class="ink2" id="project"></span>
     <span class="muted small" id="stamp"></span>
   </header>
   <div id="app" class="grid"></div>
 </main>
 <script>
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const labels = { done: 'done', progress: 'in progress', planned: 'planned', owner: 'needs you', review: 'in review', blocked: 'blocked', failed: 'failed', moved: 'moved', open: 'open' };
-const badge = (status, text) => `<span class="badge ${esc(status)}">${esc(text ?? labels[status] ?? status)}</span>`;
+const LABEL = { done: 'done', progress: 'in progress', planned: 'planned', owner: 'needs you', blocked: 'blocked', failed: 'failed', moved: 'moved', open: 'open', hold: 'on hold', unverified: 'not verified', closed: 'closed', next: 'next', later: 'later', current: 'now', working: 'working', idle: 'idle', limit: 'at a limit' };
+const tag = (status, text) => `<span class="tag"><i class="dot ${esc(status)}"></i>${esc(text ?? LABEL[status] ?? status)}</span>`;
 const ago = (iso) => { const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000)); return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
 const drafts = {}; // unsent answers survive the periodic re-render
 
-function prBadge(pr) {
-  if (!pr) return badge('planned', 'no PR yet');
-  if (pr.state === 'MERGED') return badge('done', 'merged');
-  if (pr.state === 'CLOSED') return badge('planned', 'closed');
-  return badge(pr.checks === 'green' ? 'green' : pr.checks === 'red' ? 'red' : 'running', pr.checks === 'green' ? 'CI green' : pr.checks === 'red' ? 'CI red' : 'CI running');
+// One status per work item: a named PR's live state wins over the hand-kept status.
+function statusOf(it, prs) {
+  const pr = it.pr ? prs.get(it.pr) : null;
+  // A row whose roadmap state says part is merged and the rest planned stays in progress.
+  if (pr?.state === 'MERGED') return it.state === 'progress' && /planned|rest|left/i.test(it.stateText ?? '') ? 'progress' : 'done';
+  if (it.status === 'owner') return 'owner';
+  if (pr?.state === 'OPEN') return pr.checks === 'red' ? 'red' : 'progress';
+  return it.status ?? 'planned';
+}
+const tally = (items, prs) => {
+  const t = { done: 0, progress: 0, planned: 0, total: items.length };
+  for (const it of items) { const s = statusOf(it, prs); t[s === 'done' ? 'done' : s === 'planned' ? 'planned' : 'progress'] += 1; }
+  return t;
+};
+const seg = (t) => `<div class="seg" title="${t.done} done, ${t.progress} in progress, ${t.planned} planned">${t.done ? `<i class="done" style="flex:${t.done}"></i>` : ''}${t.progress ? `<i class="progress" style="flex:${t.progress}"></i>` : ''}${t.planned ? `<i style="flex:${t.planned}"></i>` : ''}</div>`;
+const legend = `<div class="legend"><span><i class="dot done"></i>done</span><span><i class="dot progress"></i>in progress</span><span><i class="dot"></i>planned</span></div>`;
+
+function ring(value) {
+  const r = 46, c = 2 * Math.PI * r;
+  return `<svg class="ring" width="118" height="118" viewBox="0 0 118 118" role="img" aria-label="${value}% of work items merged">
+    <circle cx="59" cy="59" r="${r}" fill="none" stroke="var(--track)" stroke-width="12"/>
+    <circle cx="59" cy="59" r="${r}" fill="none" stroke="var(--done)" stroke-width="12" stroke-linecap="round" stroke-dasharray="${(c * value) / 100} ${c}" transform="rotate(-90 59 59)"/>
+    <text x="59" y="68" text-anchor="middle">${value}%</text></svg>`;
 }
 
-function item(it, prs) {
-  const pr = it.pr ? prs.get(it.pr) : null;
-  // A PR's live state wins over the hand-kept status once the item has one.
-  const waitsForOwner = it.status === 'owner' && pr?.state === 'OPEN';
-  const shown = pr && !waitsForOwner ? prBadge(pr) : badge(it.status ?? 'planned');
+function mergeChart(days) {
+  const w = 560, h = 150, pad = 22, max = Math.max(1, ...days.map((d) => d.count)), bw = (w - 8) / days.length;
+  const bars = days.map((d, i) => {
+    const bh = Math.round(((h - pad - 22) * d.count) / max), x = 4 + i * bw, y = h - pad - bh;
+    const label = d.count && (d.count === max || i === days.length - 1) ? `<text x="${x + bw / 2}" y="${y - 5}" text-anchor="middle" font-size="12" fill="var(--ink2)">${d.count}</text>` : '';
+    const shape = bh ? `<path d="M${x + 1},${h - pad} v${-(bh - 4)} q0,-4 4,-4 h${bw - 10} q4,0 4,4 v${bh - 4} z" fill="var(--prog)"/>` : '';
+    const tick = i % 2 === 1 || i === days.length - 1 ? `<text x="${x + bw / 2}" y="${h - 6}" text-anchor="middle" font-size="11" fill="var(--muted)">${Number(d.day.slice(8))}</text>` : '';
+    return `${shape}${label}${tick}<rect x="${x}" y="0" width="${bw}" height="${h - pad}" fill="transparent" data-tip="${esc(new Date(d.day).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }))}: ${d.count} merged"/>`;
+  }).join('');
+  const rows = days.map((d) => `<tr><td>${esc(d.day)}</td><td>${d.count}</td></tr>`).join('');
+  return `<div class="chart"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Pull requests merged per day">${bars}<line x1="0" x2="${w}" y1="${h - pad}" y2="${h - pad}" stroke="var(--line)"/></svg><div class="tip"></div></div>
+    <details><summary>As a table</summary><table><tr><th>Day</th><th>Merged</th></tr>${rows}</table></details>`;
+}
+
+function itemRow(it, prs) {
+  const pr = it.pr ? prs.get(it.pr) : null, s = statusOf(it, prs);
+  const text = pr?.state === 'OPEN' && s !== 'owner' ? (pr.checks === 'green' ? 'CI green' : pr.checks === 'red' ? 'CI red' : 'CI running') : undefined;
   const link = pr ? ` <a class="muted small" href="${esc(pr.url)}" target="_blank">#${pr.number}</a>` : '';
   const who = it.owner ? ` <span class="muted small">· ${esc(it.owner)}</span>` : '';
-  const note = it.note ? `<div class="muted small">${esc(it.note)}</div>` : '';
-  return `<div class="row">${shown}<div class="grow">${esc(it.label)}${link}${who}${note}</div></div>`;
+  return `<div class="row">${tag(s, text)}<div class="grow">${esc(it.label)}${link}${who}${it.note ? `<div class="muted small">${esc(it.note)}</div>` : ''}</div></div>`;
 }
 
 function question(q) {
   const d = drafts[q.id] ?? (drafts[q.id] = { choice: null, text: '' });
-  const options = q.options.map((o, i) => `
-    <label class="option"><input type="radio" name="q-${esc(q.id)}" value="${i}" ${d.choice === i ? 'checked' : ''} data-q="${esc(q.id)}">
-      <span><strong>${esc(o.label)}${o.recommended ? ' (recommended)' : ''}</strong><br><span class="muted small">${esc(o.description ?? '')}</span></span></label>`).join('');
-  return `<section class="panel wide question"><h2>${esc(q.title)}</h2><div>${esc(q.body ?? '')}</div>${options}
-    <textarea placeholder="Or type your own answer, or add a note" data-qt="${esc(q.id)}">${esc(d.text)}</textarea>
-    <button data-send="${esc(q.id)}">Send answer</button></section>`;
+  const options = q.options.map((o, i) => `<label class="option"><input type="radio" name="q-${esc(q.id)}" value="${i}" ${d.choice === i ? 'checked' : ''} data-q="${esc(q.id)}">
+    <span><strong>${esc(o.label)}${o.recommended ? ' (recommended)' : ''}</strong><br><span class="muted small">${esc(o.description ?? '')}</span></span></label>`).join('');
+  return `<section class="panel question"><h3>Needs your answer</h3><h2>${esc(q.title)}</h2><div class="ink2">${esc(q.body ?? '')}</div>${options}
+    <textarea placeholder="Or type your own answer, or add a note" data-qt="${esc(q.id)}">${esc(d.text)}</textarea><button data-send="${esc(q.id)}">Send answer</button></section>`;
 }
 
-// A phase as the roadmap gives it, with the hand-kept part of state.json laid over it:
-// state.phases[<phase id>] = { note, journeys: { ID: { status, note, name } }, criteria: { ID: status }, items: [...] }.
+// The roadmap gives the phases, their journeys, changes and criteria (server.mjs); state.json lays the
+// hand-kept part over it: state.phases[<phase id>] = { note, journeys: { <id>: { status, note } },
+// criteria: { <id>: status }, items: [{ label, pr, status, group, j, process }] }, and state.history /
+// state.upcoming entries (matched by name) may add a `when`, `summary`, `facts` or `scope`.
+const byName = (list) => new Map((list ?? []).map((x) => [x.name, x]));
+
 function render(data) {
   const prs = new Map(data.prs.map((p) => [p.number, p]));
   const s = data.state ?? {};
   document.getElementById('project').textContent = data.project ?? '';
-  document.getElementById('stamp').textContent = `page data ${new Date(data.at).toLocaleTimeString()} · notes updated ${s.updated ? ago(s.updated) : 'unknown'}`;
-  const open = data.questions.filter((q) => !q.answer);
-  const answered = data.questions.filter((q) => q.answer);
-  let html = open.map(question).join('');
+  document.getElementById('stamp').textContent = `live data ${new Date(data.at).toLocaleTimeString()} · notes updated ${s.updated ? ago(s.updated) : 'unknown'}`;
 
-  if (s.headline) html += `<section class="panel wide"><h2>Now</h2><div>${esc(s.headline)}</div></section>`;
-  if (!data.phases.length) html += `<section class="panel wide"><h2>No phases</h2><div class="muted">No roadmap section with a **Goal:** line was found in ${esc(data.sources.roadmap ?? 'docs.roadmap (not set)')}.</div></section>`;
-
-  // The current phase first, then the planned ones; closed phases last and folded.
-  const order = { progress: 0, planned: 1, done: 2 };
-  for (const phase of [...data.phases].sort((a, b) => order[a.status] - order[b.status])) {
-    const hand = (s.phases ?? {})[phase.id] ?? {};
-    const criteria = phase.criteria.map((c) => ({ ...c, status: c.moved ? 'moved' : (hand.criteria ?? {})[c.id] ?? 'open' }));
-    const passed = criteria.filter((c) => c.status === 'done').length;
-    const counted = criteria.filter((c) => c.status !== 'moved').length;
-    const journeys = phase.journeys.map((j) => ({ ...j, ...(hand.journeys ?? {})[j.id] }));
-    // Journeys only state.json names (no row in the journey index) come first: the owner named them.
-    journeys.unshift(...Object.entries(hand.journeys ?? {}).filter(([id]) => !journeys.some((x) => x.id === id)).map(([id, j]) => ({ id, ...j })));
-    const items = [...phase.items.map((it) => ({ ...it, status: it.state })), ...(hand.items ?? [])];
-    const folded = phase.status === 'done';
-    html += `<section class="panel wide">${folded ? '<details><summary>' : ''}<h2 style="display:inline">${esc(phase.name)} ${badge(phase.status)}</h2>${folded ? '</summary>' : ''}<div class="muted">${esc(phase.goal)}</div>`;
-    if (hand.note) html += `<div>${esc(hand.note)}</div>`;
-    if (counted) html += `<div class="bar"><i style="width:${Math.round((100 * passed) / counted)}%"></i></div><div class="small muted">${passed} of ${counted} acceptance criteria shown passing by a phase run</div>`;
-    if (journeys.length) html += `<h3>Journeys</h3>` + journeys.map((j) => item({ label: `${j.id}  ${j.name ?? ''}`, status: j.status ?? 'open', note: j.note }, prs)).join('');
-    let group = null;
-    for (const it of items) {
-      if ((it.group ?? 'Changes') !== group) html += `<h3>${esc((group = it.group ?? 'Changes'))}</h3>`;
-      html += item(it, prs);
-    }
-    if (criteria.length) html += `<details><summary>Acceptance criteria (${counted}) · ${esc(phase.acceptance)}</summary>${criteria.map((c) => item({ label: `${c.id}  ${c.text}`, status: c.status }, prs)).join('')}</details>`;
-    html += `${folded ? '</details>' : ''}</section>`;
-  }
-
+  const phase = data.phases.find((p) => p.kind === 'current') ?? data.phases.find((p) => p.kind === 'next') ?? { name: 'No current phase', id: '', main: [], journeys: [], items: [], criteria: [] };
+  const hand = (s.phases ?? {})[phase.id] ?? {};
+  const allItems = [...phase.items, ...(hand.items ?? []).map((it) => ({ group: 'Other', ...it, state: it.status }))].map((it) => ({ ...it, status: it.state }));
+  const product = allItems.filter((it) => !it.process);
+  const groups = [...new Set(allItems.map((it) => it.group))].map((name) => ({ name, items: allItems.filter((it) => it.group === name) }));
+  const all = tally(product, prs), progress = pct(all.done, all.total);
+  const criteria = phase.criteria.map((c) => ({ ...c, status: c.moved ? 'moved' : (hand.criteria ?? {})[c.id] ?? 'open' }));
+  const counted = criteria.filter((c) => c.status !== 'moved');
+  const passing = counted.filter((c) => c.status === 'done').length;
   const openPrs = data.prs.filter((p) => p.state === 'OPEN');
-  const merged = data.prs.filter((p) => p.state === 'MERGED' && Date.now() - new Date(p.mergedAt) < 24 * 3600e3).sort((a, b) => b.mergedAt.localeCompare(a.mergedAt));
-  html += `<section class="panel"><h2>Open pull requests (${openPrs.length})</h2>${openPrs.map((p) => `<div class="row">${prBadge(p)}<div class="grow truncate"><a href="${esc(p.url)}" target="_blank">#${p.number}</a> ${esc(p.title)}</div></div>`).join('') || '<div class="muted">none</div>'}</section>`;
-  html += `<section class="panel"><h2>Merged in the last 24 h (${merged.length})</h2>${merged.map((p) => `<div class="row">${badge('done', ago(p.mergedAt))}<div class="grow truncate"><a href="${esc(p.url)}" target="_blank">#${p.number}</a> ${esc(p.title)}</div></div>`).join('') || '<div class="muted">none</div>'}</section>`;
-  html += `<section class="panel"><h2>Sessions (${data.sessions.length})</h2>${data.sessions.map((x) => `<div class="row">${badge(x.state)}<div class="grow"><strong>${esc(x.name)}</strong> <span class="muted small">${esc((s.sessions ?? {})[x.name] ?? '')}</span></div></div>`).join('')}</section>`;
-  if (answered.length) html += `<section class="panel"><h2>Answered</h2>${answered.map((q) => `<div class="row">${badge('done', ago(q.answer.at))}<div class="grow">${esc(q.title)}<div class="muted small">${esc(q.answer.choice != null ? q.options[q.answer.choice]?.label : '')} ${esc(q.answer.text)}</div></div></div>`).join('')}</section>`;
+  const ci = { green: 0, running: 0, red: 0 };
+  for (const p of openPrs) ci[p.checks === 'green' ? 'green' : p.checks === 'red' ? 'red' : 'running'] += 1;
+  const days = data.merges?.days ?? [], today = days.at(-1)?.count ?? 0, week = days.slice(-7).reduce((n, d) => n + d.count, 0);
+  const working = data.sessions.filter((x) => x.state === 'working').length;
+  const openQ = data.questions.filter((q) => !q.answer), answered = data.questions.filter((q) => q.answer);
+  const waiting = openQ.length + allItems.filter((it) => statusOf(it, prs) === 'owner').length;
+  const handHistory = byName(s.history), handUpcoming = byName(s.upcoming);
+  const history = data.history.map((p) => ({ ...p, ...handHistory.get(p.name) }));
+  const upcoming = data.phases.filter((p) => p.kind === 'next' || p.kind === 'later').map((p) => ({ name: p.name, status: p.kind, summary: p.summary, scope: p.scope, ...handUpcoming.get(p.name) }));
+  const journeys = (phase.main.length ? phase.main : phase.journeys).map((j) => ({ ...j, ...(hand.journeys ?? {})[j.id] }));
+
+  let html = openQ.map(question).join('');
+
+  // KPI row
+  html += `<section class="panel s4"><h3>${esc(phase.name)} · current phase</h3><div class="hero">${ring(progress)}<div><div><strong>${all.done} of ${all.total}</strong> changes merged</div><div class="ink2 small">${all.progress} in progress · ${all.planned} planned</div><div class="ink2 small" style="margin-top:6px">${passing} of ${counted.length} acceptance criteria verified</div></div></div></section>`;
+  html += `<section class="panel s3 kpi" style="grid-column: span 2"><h3>Merged today</h3><div class="num">${today}</div><div class="ink2 small">${week} in the last 7 days</div><div class="muted small">${data.merges?.total ?? 0} pull requests in all</div></section>`;
+  html += `<section class="panel s3 kpi" style="grid-column: span 2"><h3>Open pull requests</h3><div class="num">${openPrs.length}</div><div class="ink2 small"><i class="dot done"></i>${ci.green} green · <i class="dot progress"></i>${ci.running} running${ci.red ? ` · <i class="dot red"></i>${ci.red} red` : ''}</div></section>`;
+  html += `<section class="panel s3 kpi" style="grid-column: span 2"><h3>Sessions working</h3><div class="num">${working}<span class="unit"> / ${data.sessions.length}</span></div><div class="ink2 small">${data.sessions.filter((x) => x.state === 'limit').length} at a limit</div></section>`;
+  html += `<section class="panel s3 kpi" style="grid-column: span 2"><h3>Waiting on you</h3><div class="num">${waiting}</div><div class="ink2 small">${waiting ? '<i class="dot owner"></i>questions and reads' : 'nothing open'}</div></section>`;
+
+  // Roadmap strip: every phase in order
+  const steps = [...history.map((p) => ({ ...p, kind: p.status })), ...(phase.id ? [{ name: phase.name, kind: 'current', when: `${progress}% merged` }] : []), ...upcoming.map((p) => ({ ...p, kind: p.status, when: LABEL[p.status] }))];
+  html += `<section class="panel"><h2>Roadmap</h2><div class="road">${steps.map((p) => `<div class="step ${esc(p.kind)}"><b>${esc(p.name)}</b><span>${esc([LABEL[p.kind], p.when].filter((v, i, a) => v && v !== 'now' && a.indexOf(v) === i).join(' · '))}</span></div>`).join('')}</div>
+    <div class="legend"><span><i class="dot done"></i>done</span><span><i class="dot progress"></i>current</span><span><i class="dot owner"></i>on hold, closed early or end not verified</span><span><i class="dot"></i>ahead</span></div></section>`;
+
+  if (s.headline) html += `<section class="panel"><h3>Now</h3><div>${esc(s.headline)}</div>${hand.note ? `<div class="ink2 small" style="margin-top:6px">${esc(hand.note)}</div>` : ''}</section>`;
+
+  // Journeys of the current phase
+  html += `<section class="panel"><h2>Journeys in ${esc(phase.name)}</h2><div class="cards">${journeys.map((j) => {
+    const t = tally(product.filter((it) => (it.j ?? []).includes(j.id)), prs);
+    const title = phase.main.length ? `Journey ${j.id}` : j.id;
+    const ids = (j.journeys ?? []).length ? `<div class="chips">${j.journeys.map((x) => `<span class="chip">${esc(x)}</span>`).join('')}</div>` : '';
+    return `<div class="card"><h3>${esc(title)} · ${pct(t.done, t.total)}% merged</h3><div><strong>${esc(j.name)}</strong></div><div style="margin:10px 0 4px">${seg(t)}</div><div class="muted small">${t.done} done · ${t.progress} in progress · ${t.planned} planned</div>${j.note ? `<div class="ink2 small" style="margin-top:8px">${esc(j.note)}</div>` : ''}${ids}</div>`;
+  }).join('')}</div>${legend}</section>`;
+
+  // Tracks and throughput
+  html += `<section class="panel s6"><h2>Progress by track</h2>${groups.map((t) => { const x = tally(t.items, prs); return `<div style="margin:10px 0 14px"><div style="display:flex;justify-content:space-between"><strong>${esc(t.name)}</strong><span class="ink2 small">${x.done} of ${x.total} merged</span></div><div style="margin-top:5px">${seg(x)}</div></div>`; }).join('')}${legend}</section>`;
+  html += `<section class="panel s6"><h2>Pull requests merged per day, last 14 days</h2>${mergeChart(days)}</section>`;
+
+  // What is behind us and ahead
+  html += `<section class="panel s6"><h2>Completed so far</h2>${history.map((p) => `<div class="row">${tag(p.status)}<div class="grow"><strong>${esc(p.name)}</strong> <span class="muted small">${esc(p.when ?? '')}</span><div class="ink2 small">${esc(p.summary ?? '')}</div>${p.facts ? `<div class="chips">${p.facts.map((f) => `<span class="chip">${esc(f)}</span>`).join('')}</div>` : ''}</div></div>`).join('')}</section>`;
+  html += `<section class="panel s6"><h2>Still ahead</h2>${upcoming.map((p) => `<div class="row">${tag(p.status)}<div class="grow"><strong>${esc(p.name)}</strong><div class="ink2 small">${esc(p.summary ?? '')}</div><div class="chips">${(p.scope ?? []).map((f) => `<span class="chip">${esc(f)}</span>`).join('')}</div></div></div>`).join('')}</section>`;
+
+  // Detail
+  for (const t of groups) html += `<section class="panel s4"><h2>${esc(t.name)}</h2>${t.items.map((it) => itemRow(it, prs)).join('')}</section>`;
+  html += `<section class="panel s4"><h2>Open pull requests</h2>${openPrs.map((p) => `<div class="row">${tag(p.checks === 'green' ? 'done' : p.checks === 'red' ? 'red' : 'running', p.checks === 'green' ? 'CI green' : p.checks === 'red' ? 'CI red' : 'CI running')}<div class="grow truncate"><a href="${esc(p.url)}" target="_blank">#${p.number}</a> ${esc(p.title)}</div></div>`).join('') || '<div class="muted">none</div>'}</section>`;
+  const merged = data.prs.filter((p) => p.state === 'MERGED' && Date.now() - new Date(p.mergedAt) < 864e5).sort((a, b) => b.mergedAt.localeCompare(a.mergedAt));
+  html += `<section class="panel s4"><h2>Merged in the last 24 h</h2>${merged.slice(0, 14).map((p) => `<div class="row">${tag('done', ago(p.mergedAt))}<div class="grow truncate"><a href="${esc(p.url)}" target="_blank">#${p.number}</a> ${esc(p.title)}</div></div>`).join('') || '<div class="muted">none</div>'}${merged.length > 14 ? `<div class="muted small">and ${merged.length - 14} more</div>` : ''}</section>`;
+  html += `<section class="panel s4"><h2>Sessions</h2>${data.sessions.map((x) => `<div class="row">${tag(x.state)}<div class="grow"><strong>${esc(x.name)}</strong><div class="muted small">${esc((s.sessions ?? {})[x.name] ?? '')}</div></div></div>`).join('')}</section>`;
+  if (phase.main.length && phase.journeys.length) html += `<section class="panel"><details><summary>Journeys of the journey index in this phase (${phase.journeys.length})</summary>${phase.journeys.map((j) => `<div class="row">${tag((hand.journeys ?? {})[j.id]?.status ?? 'open')}<div class="grow"><strong>${esc(j.id)}</strong> ${esc(j.name)}</div></div>`).join('')}</details></section>`;
+  html += `<section class="panel"><details><summary>Acceptance criteria (${passing} of ${counted.length} verified)${phase.acceptance ? ` · ${esc(phase.acceptance)}` : ''}</summary>${criteria.map((c) => `<div class="row">${tag(c.status)}<div class="grow"><strong>${esc(c.id)}</strong> ${esc(c.text)}</div></div>`).join('')}</details></section>`;
+  if (answered.length) html += `<section class="panel"><h2>Your answers</h2>${answered.map((q) => `<div class="row">${tag('done', ago(q.answer.at))}<div class="grow">${esc(q.title)}<div class="ink2 small">${esc(q.answer.choice != null ? q.options[q.answer.choice]?.label : '')} ${esc(q.answer.text)}</div></div></div>`).join('')}</section>`;
   document.getElementById('app').innerHTML = html;
 }
 
@@ -146,6 +231,15 @@ async function refresh() {
   if (document.activeElement?.tagName === 'TEXTAREA') return;
   try { render(await (await fetch('/api/state')).json()); } catch { document.getElementById('stamp').textContent = 'board server not reachable'; }
 }
+document.addEventListener('mousemove', (e) => {
+  const chart = e.target.closest?.('.chart'), tip = chart?.querySelector('.tip');
+  for (const t of document.querySelectorAll('.tip')) if (t !== tip) t.style.display = 'none';
+  if (!tip) return;
+  const text = e.target.dataset?.tip;
+  if (!text) { tip.style.display = 'none'; return; }
+  const box = chart.getBoundingClientRect();
+  tip.textContent = text; tip.style.display = 'block'; tip.style.left = `${e.clientX - box.left}px`; tip.style.top = `${e.clientY - box.top}px`;
+});
 document.addEventListener('change', (e) => { const q = e.target.dataset?.q; if (q) drafts[q].choice = Number(e.target.value); });
 document.addEventListener('input', (e) => { const q = e.target.dataset?.qt; if (q) drafts[q].text = e.target.value; });
 document.addEventListener('click', async (e) => {

@@ -3,7 +3,10 @@
 // Usage: node server.mjs <repository dir>   (lc-board starts it)
 //
 // What it derives, so nobody keeps it by hand:
-//   phases, goals, journeys and changes from the roadmap (docs.roadmap; templates/roadmap.md);
+//   the roadmap strip, history, current and coming phases, their main journeys (a numbered list
+//   with "Stories …; journeys …"), changes (State tables, linked to journeys by stories) and scope
+//   (bullet lead-ins) from the roadmap (docs.roadmap; templates/roadmap.md);
+//   merges per day for 14 days, and all merged, from `gh pr list`;
 //   journey names from the journey index (docs.journeys): table rows whose first cell is an ID;
 //   acceptance criteria from the phase's acceptance file, linked from its roadmap section;
 //   PR state and CI from `gh pr list`; sessions from tmux (sessions.tmux_session).
@@ -136,50 +139,135 @@ async function criteria(file) {
 
 const stateOf = (s) => {
   const t = s.toLowerCase();
+  if (/merged|done/.test(t) && /planned|left|rest/.test(t)) return 'progress';
   if (/\bmerged\b|\bdone\b/.test(t)) return 'done';
   if (/in progress|in review|open:/.test(t)) return 'progress';
   if (/blocked/.test(t)) return 'blocked';
   return 'planned';
 };
 
-// Phases from the roadmap: each `## ` section with a **Goal:** line.
-async function phases() {
+// Story numbers in a text: "107–112, 10, 47" (ranges with a dash or "to").
+function stories(s) {
+  const out = new Set();
+  for (const m of s.matchAll(/(\d+)\s*(?:[–-]|to)\s*(\d+)|(\d+)/g)) {
+    if (m[3]) out.add(Number(m[3]));
+    else for (let n = Number(m[1]); n <= Number(m[2]) && n - Number(m[1]) < 500; n++) out.add(n);
+  }
+  return out;
+}
+
+// A status word of the roadmap's history table, as one of the board's states.
+const historyStatus = (s) => {
+  const t = s.toLowerCase();
+  if (/hold/.test(t)) return 'hold';
+  if (/not verified|no end/.test(t)) return 'unverified';
+  if (/closed/.test(t)) return 'closed';
+  if (/done|accepted|met/.test(t)) return 'done';
+  return 'planned';
+};
+const firstSentence = (s) => {
+  const t = plain(s).replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+([.,;])/g, '$1').split(/(?<=\.)\s/)[0].trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+// The roadmap as the board shows it:
+//   history: rows of a history table (a `## ` section whose heading says history or earlier),
+//            then the closed phase sections;
+//   phases:  each `## ` section with a **Goal:** line. Its heading's (…) says current, next, later or closed.
+//   Per phase: the numbered list of main journeys (with their stories and journey IDs), the journey
+//   IDs it names, changes from its State tables (stories per change link it to the main journeys),
+//   the acceptance criteria from the linked acceptance file, and the bold lead-ins of its bullets as scope.
+async function roadmap() {
   const md = await text(roadmapPath);
-  if (!md) return [];
+  if (!md) return { history: [], phases: [] };
   const known = await journeyNames();
-  const out = [];
+  const history = [];
+  const phases = [];
   for (const section of md.split(/\n(?=## )/).slice(1)) {
     const lines = section.split('\n');
     const head = lines[0].replace(/^##\s*/, '');
     const body = lines.slice(1).join('\n');
     const goal = body.match(/\*\*Goal:\*\*\s*([^\n]*?)(?=\s*\*\*\w[^*]*:\*\*|\n|$)/);
-    if (!goal) continue;
+    if (!goal) {
+      if (!/history|earlier/i.test(head)) continue;
+      for (const t of tables(lines)) {
+        const key = t.head.find((h) => h === 'status' || h === 'state');
+        if (!key) continue;
+        for (const row of t.rows) {
+          const [name, ...rest] = plain(row[t.head[0]]).split(':');
+          const st = plain(row[key]);
+          const when = st.replace(/^[^:,(]*[:,]?\s*/, '').replace(/^\((.*)\)$/, '$1');
+          const summary = rest.join(':').trim();
+          history.push({ name: name.trim(), status: historyStatus(st), when, summary: summary && summary.charAt(0).toUpperCase() + summary.slice(1) });
+        }
+      }
+      continue;
+    }
     const name = head.replace(/\s*\(([^)]*)\)\s*$/, '');
     const tag = (head.match(/\(([^)]*)\)\s*$/)?.[1] ?? '').toLowerCase();
-    const status = /current|progress/.test(tag) ? 'progress' : /closed|done/.test(tag) ? 'done' : 'planned';
+    const kind = /current|progress/.test(tag) ? 'current' : /closed/.test(tag) ? 'closed' : /done/.test(tag) ? 'done' : /next/.test(tag) ? 'next' : 'later';
     const link = body.match(/\]\(([^)#\s]*acceptance[^)#\s]*\.md)\)/i)?.[1];
+    const main = [];
+    for (const l of lines) {
+      const m = l.match(/^(\d+)\.\s+(.*)$/);
+      if (!m) continue;
+      main.push({ id: m[1], name: firstSentence(m[2]).replace(/\.$/, ''), stories: [...stories(m[2].match(/Stories\s+([^;.]*)/i)?.[1] ?? '')], journeys: journeyIds(m[2], known) });
+    }
     const items = [];
     for (const t of tables(lines)) {
       const key = t.head.find((h) => h === 'state' || h === 'status');
       if (!key) continue;
       for (const row of t.rows) {
         const prs = [...row[key].matchAll(/#(\d+)/g)].map((m) => Number(m[1]));
-        items.push({ group: t.title || 'Changes', label: plain(row[t.head[0]]), state: stateOf(row[key]), stateText: plain(row[key]), pr: prs.at(-1) ?? null, owner: plain(row.owner ?? '') });
+        const own = stories(row.stories ?? '');
+        items.push({
+          group: t.title || 'Changes',
+          label: plain(row[t.head[0]]),
+          state: stateOf(row[key]),
+          stateText: plain(row[key]),
+          pr: prs.at(-1) ?? null,
+          owner: plain(row.owner ?? ''),
+          j: main.filter((j) => j.stories.some((n) => own.has(n))).map((j) => j.id),
+        });
       }
     }
-    out.push({
+    const scope = lines
+      .map((l) => l.match(/^- (?:\*\*([^*]+?)[:.]?\*\*|([^:(]{3,60})(?::|\s\())/))
+      .filter(Boolean)
+      .map((m) => plain(m[1] ?? m[2]).replace(/[:.]$/, ''));
+    const phase = {
       id: slug(name),
       name,
-      status,
+      kind,
+      status: kind === 'current' ? 'progress' : kind === 'closed' || kind === 'done' ? 'done' : 'planned',
       goal: plain(goal[1]),
+      summary: firstSentence(goal[1]),
+      main,
       journeys: journeyIds(body, known).map((id) => ({ id, name: known.get(id) })),
       criteria: link ? await criteria(resolve(dirname(roadmapPath), link)) : [],
       acceptance: link ?? null,
       items,
-    });
+      scope,
+    };
+    if (kind === 'closed' || kind === 'done') history.push({ name, status: kind, when: '', summary: phase.summary });
+    phases.push(phase);
   }
-  return out;
+  return { history, phases };
 }
+
+// Merged pull requests per local day for the last 14 days, and the count of all merged.
+const merges = cached(300_000, async () => {
+  const out = await run('gh', ['pr', 'list', '--state', 'merged', '--limit', '2000', '--json', 'mergedAt']);
+  const all = out ? JSON.parse(out) : [];
+  const days = [];
+  for (let i = 13; i >= 0; i--) days.push({ day: new Date(Date.now() - i * 86_400_000).toLocaleDateString('sv'), count: 0 });
+  const byDay = new Map(days.map((d) => [d.day, d]));
+  for (const pr of all) {
+    const slot = byDay.get(new Date(pr.mergedAt).toLocaleDateString('sv'));
+    if (slot) slot.count += 1;
+  }
+  return { days, total: all.length };
+});
 
 const checkState = (rollup) => {
   const checks = (rollup ?? []).filter((c) => (c.conclusion ?? c.state) !== 'SKIPPED');
@@ -227,20 +315,23 @@ createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (req.method === 'GET' && url.pathname === '/') return send(res, 200, 'text/html; charset=utf-8', await readFile(join(here, 'index.html')));
   if (req.method === 'GET' && url.pathname === '/api/state') {
-    const [state, derived, questions, given, prs, live] = await Promise.all([
+    const [state, derived, questions, given, prs, live, merged] = await Promise.all([
       json('state.json', {}),
-      phases(),
+      roadmap(),
       json('questions.json', []),
       answers(),
       pullRequests(),
       sessions(),
+      merges(),
     ]);
     const answered = new Map(given.map((a) => [a.id, a]));
     return send(res, 200, 'application/json', JSON.stringify({
       project: conf.name ?? '',
       sources: { roadmap: conf['docs.roadmap'] ?? null, journeys: conf['docs.journeys'] ?? null },
       state,
-      phases: derived,
+      history: derived.history,
+      phases: derived.phases,
+      merges: merged,
       prs,
       sessions: live,
       questions: questions.map((q) => ({ ...q, answer: answered.get(q.id) ?? null })),
