@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Start, stop or check the ADLC board for a repository (board/server.mjs).
+# Usage: lc-board start|stop|status [repo dir, default .]
+# Port and data dir come from .agents/project.yaml (board.port, board.data_dir, else
+# <handoff_dir>/board); LC_BOARD_PORT and LC_BOARD_DIR override them.
+set -euo pipefail
+cmd=${1:-status}; dir=$(cd "${2:-.}" && pwd)
+. "$(dirname "$(readlink -f "$0")")/lc-lib.sh"
+kit=$(dirname "$(dirname "$(readlink -f "$0")")")
+root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || echo "$dir")
+port=${LC_BOARD_PORT:-$(lc_get "$root" board.port 4777)}
+handoff=$(lc_get "$root" handoff_dir)
+data=${LC_BOARD_DIR:-$(lc_get "$root" board.data_dir "${handoff:+$handoff/board}")}
+data=${data:-$root/.agents/board}
+pidfile=$data/server.pid
+running() { [[ -f $pidfile ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; }
+
+case "$cmd" in
+  start)
+    if running; then echo "board already running (pid $(cat "$pidfile")) on http://localhost:$port"; exit 0; fi
+    mkdir -p "$data"
+    [[ -f $data/state.json ]] || echo '{"headline": "", "phases": {}, "sessions": {}}' >"$data/state.json"
+    [[ -f $data/questions.json ]] || echo '[]' >"$data/questions.json"
+    touch "$data/answers.jsonl"
+    LC_BOARD_PORT=$port LC_BOARD_DIR=$data nohup node "$kit/board/server.mjs" "$root" >"$data/server.log" 2>&1 &
+    echo $! >"$pidfile"
+    sleep 1
+    running || { echo "board failed to start:" >&2; tail -5 "$data/server.log" >&2; exit 1; }
+    echo "board on http://localhost:$port (data $data)" ;;
+  stop)
+    if running; then kill "$(cat "$pidfile")"; rm -f "$pidfile"; echo stopped; else echo "board not running"; fi ;;
+  status)
+    if running; then echo "running (pid $(cat "$pidfile")) on http://localhost:$port, data $data"; else echo "not running; data $data"; exit 1; fi ;;
+  *) echo "usage: lc-board start|stop|status [repo dir]" >&2; exit 2 ;;
+esac

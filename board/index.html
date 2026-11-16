@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADLC board</title>
+<style>
+  :root {
+    --bg: #f6f7f4; --panel: #ffffff; --line: #dfe5df; --ink: #17302a; --muted: #5d6f69;
+    --green: #1f7a55; --green-bg: #e3f3ea; --red: #b3372f; --red-bg: #fbe6e3;
+    --amber: #9a6a00; --amber-bg: #fbf0d3; --blue: #2f5fa8; --blue-bg: #e4ecf8; --grey-bg: #edf0ed;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111715; --panel: #18211e; --line: #2a3632; --ink: #e4ede9; --muted: #92a39d;
+      --green: #6fd3a3; --green-bg: #17382b; --red: #ff9186; --red-bg: #43201d;
+      --amber: #f0c462; --amber-bg: #3d3115; --blue: #92b7f2; --blue-bg: #1b2b45; --grey-bg: #222c29;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 1280px; margin: 0 auto; padding: 20px 16px 60px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 14px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 17px; margin: 0 0 8px; }
+  h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .wide { grid-column: 1 / -1; }
+  .row { display: flex; gap: 8px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .row > .grow { flex: 1; min-width: 0; }
+  .badge { flex: none; display: inline-block; min-width: 86px; text-align: center; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--grey-bg); color: var(--muted); }
+  .done, .green, .MERGED { background: var(--green-bg); color: var(--green); }
+  .red, .failed, .blocked { background: var(--red-bg); color: var(--red); }
+  .running, .progress, .working { background: var(--blue-bg); color: var(--blue); }
+  .owner, .waiting, .limit, .review { background: var(--amber-bg); color: var(--amber); }
+  a { color: inherit; }
+  .bar { height: 8px; border-radius: 999px; background: var(--grey-bg); overflow: hidden; margin: 6px 0 2px; }
+  .bar > i { display: block; height: 100%; background: var(--green); }
+  .question { border: 2px solid var(--amber); }
+  .option { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; margin: 6px 0; cursor: pointer; }
+  .option input { margin-top: 4px; }
+  textarea { width: 100%; min-height: 54px; margin-top: 6px; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; }
+  button { margin-top: 8px; padding: 7px 16px; border-radius: 8px; border: 0; background: var(--ink); color: var(--bg); font: inherit; font-weight: 600; cursor: pointer; }
+  .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  details > summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>ADLC board</h1>
+    <span class="muted" id="project"></span>
+    <span class="muted small" id="stamp"></span>
+  </header>
+  <div id="app" class="grid"></div>
+</main>
+<script>
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const labels = { done: 'done', progress: 'in progress', planned: 'planned', owner: 'needs you', review: 'in review', blocked: 'blocked', failed: 'failed', moved: 'moved', open: 'open' };
+const badge = (status, text) => `<span class="badge ${esc(status)}">${esc(text ?? labels[status] ?? status)}</span>`;
+const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+const drafts = {}; // unsent answers survive the periodic re-render
+
+function prBadge(pr) {
+  if (!pr) return badge('planned', 'no PR yet');
+  if (pr.state === 'MERGED') return badge('done', 'merged');
+  if (pr.state === 'CLOSED') return badge('planned', 'closed');
+  return badge(pr.checks === 'green' ? 'green' : pr.checks === 'red' ? 'red' : 'running', pr.checks === 'green' ? 'CI green' : pr.checks === 'red' ? 'CI red' : 'CI running');
+}
+
+function item(it, prs) {
+  const pr = it.pr ? prs.get(it.pr) : null;
+  // A PR's live state wins over the hand-kept status once the item has one.
+  const waitsForOwner = it.status === 'owner' && pr?.state === 'OPEN';
+  const shown = pr && !waitsForOwner ? prBadge(pr) : badge(it.status ?? 'planned');
+  const link = pr ? ` <a class="muted small" href="${esc(pr.url)}" target="_blank">#${pr.number}</a>` : '';
+  const who = it.owner ? ` <span class="muted small">· ${esc(it.owner)}</span>` : '';
+  const note = it.note ? `<div class="muted small">${esc(it.note)}</div>` : '';
+  return `<div class="row">${shown}<div class="grow">${esc(it.label)}${link}${who}${note}</div></div>`;
+}
+
+function question(q) {
+  const d = drafts[q.id] ?? (drafts[q.id] = { choice: null, text: '' });
+  const options = q.options.map((o, i) => `
+    <label class="option"><input type="radio" name="q-${esc(q.id)}" value="${i}" ${d.choice === i ? 'checked' : ''} data-q="${esc(q.id)}">
+      <span><strong>${esc(o.label)}${o.recommended ? ' (recommended)' : ''}</strong><br><span class="muted small">${esc(o.description ?? '')}</span></span></label>`).join('');
+  return `<section class="panel wide question"><h2>${esc(q.title)}</h2><div>${esc(q.body ?? '')}</div>${options}
+    <textarea placeholder="Or type your own answer, or add a note" data-qt="${esc(q.id)}">${esc(d.text)}</textarea>
+    <button data-send="${esc(q.id)}">Send answer</button></section>`;
+}
+
+// A phase as the roadmap gives it, with the hand-kept part of state.json laid over it:
+// state.phases[<phase id>] = { note, journeys: { ID: { status, note, name } }, criteria: { ID: status }, items: [...] }.
+function render(data) {
+  const prs = new Map(data.prs.map((p) => [p.number, p]));
+  const s = data.state ?? {};
+  document.getElementById('project').textContent = data.project ?? '';
+  document.getElementById('stamp').textContent = `page data ${new Date(data.at).toLocaleTimeString()} · notes updated ${s.updated ? ago(s.updated) : 'unknown'}`;
+  const open = data.questions.filter((q) => !q.answer);
+  const answered = data.questions.filter((q) => q.answer);
+  let html = open.map(question).join('');
+
+  if (s.headline) html += `<section class="panel wide"><h2>Now</h2><div>${esc(s.headline)}</div></section>`;
+  if (!data.phases.length) html += `<section class="panel wide"><h2>No phases</h2><div class="muted">No roadmap section with a **Goal:** line was found in ${esc(data.sources.roadmap ?? 'docs.roadmap (not set)')}.</div></section>`;
+
+  // The current phase first, then the planned ones; closed phases last and folded.
+  const order = { progress: 0, planned: 1, done: 2 };
+  for (const phase of [...data.phases].sort((a, b) => order[a.status] - order[b.status])) {
+    const hand = (s.phases ?? {})[phase.id] ?? {};
+    const criteria = phase.criteria.map((c) => ({ ...c, status: c.moved ? 'moved' : (hand.criteria ?? {})[c.id] ?? 'open' }));
+    const passed = criteria.filter((c) => c.status === 'done').length;
+    const counted = criteria.filter((c) => c.status !== 'moved').length;
+    const journeys = phase.journeys.map((j) => ({ ...j, ...(hand.journeys ?? {})[j.id] }));
+    for (const [id, j] of Object.entries(hand.journeys ?? {})) if (!journeys.some((x) => x.id === id)) journeys.push({ id, ...j });
+    const items = [...phase.items.map((it) => ({ ...it, status: it.state })), ...(hand.items ?? [])];
+    const folded = phase.status === 'done';
+    html += `<section class="panel wide">${folded ? '<details><summary>' : ''}<h2 style="display:inline">${esc(phase.name)} ${badge(phase.status)}</h2>${folded ? '</summary>' : ''}<div class="muted">${esc(phase.goal)}</div>`;
+    if (hand.note) html += `<div>${esc(hand.note)}</div>`;
+    if (counted) html += `<div class="bar"><i style="width:${Math.round((100 * passed) / counted)}%"></i></div><div class="small muted">${passed} of ${counted} acceptance criteria shown passing by a phase run</div>`;
+    if (journeys.length) html += `<h3>Journeys</h3>` + journeys.map((j) => item({ label: `${j.id}  ${j.name ?? ''}`, status: j.status ?? 'open', note: j.note }, prs)).join('');
+    let group = null;
+    for (const it of items) {
+      if ((it.group ?? 'Changes') !== group) html += `<h3>${esc((group = it.group ?? 'Changes'))}</h3>`;
+      html += item(it, prs);
+    }
+    if (criteria.length) html += `<details><summary>Acceptance criteria (${counted}) · ${esc(phase.acceptance)}</summary>${criteria.map((c) => item({ label: `${c.id}  ${c.text}`, status: c.status }, prs)).join('')}</details>`;
+    html += `${folded ? '</details>' : ''}</section>`;
+  }
+
+  const openPrs = data.prs.filter((p) => p.state === 'OPEN');
+  const merged = data.prs.filter((p) => p.state === 'MERGED' && Date.now() - new Date(p.mergedAt) < 24 * 3600e3).sort((a, b) => b.mergedAt.localeCompare(a.mergedAt));
+  html += `<section class="panel"><h2>Open pull requests (${openPrs.length})</h2>${openPrs.map((p) => `<div class="row">${prBadge(p)}<div class="grow truncate"><a href="${esc(p.url)}" target="_blank">#${p.number}</a> ${esc(p.title)}</div></div>`).join('') || '<div class="muted">none</div>'}</section>`;
+  html += `<section class="panel"><h2>Merged in the last 24 h (${merged.length})</h2>${merged.map((p) => `<div class="row">${badge('done', ago(p.mergedAt))}<div class="grow truncate"><a href="${esc(p.url)}" target="_blank">#${p.number}</a> ${esc(p.title)}</div></div>`).join('') || '<div class="muted">none</div>'}</section>`;
+  html += `<section class="panel"><h2>Sessions (${data.sessions.length})</h2>${data.sessions.map((x) => `<div class="row">${badge(x.state)}<div class="grow"><strong>${esc(x.name)}</strong> <span class="muted small">${esc((s.sessions ?? {})[x.name] ?? '')}</span></div></div>`).join('')}</section>`;
+  if (answered.length) html += `<section class="panel"><h2>Answered</h2>${answered.map((q) => `<div class="row">${badge('done', ago(q.answer.at))}<div class="grow">${esc(q.title)}<div class="muted small">${esc(q.answer.choice != null ? q.options[q.answer.choice]?.label : '')} ${esc(q.answer.text)}</div></div></div>`).join('')}</section>`;
+  document.getElementById('app').innerHTML = html;
+}
+
+async function refresh() {
+  // Do not redraw under the owner while they are typing an answer.
+  if (document.activeElement?.tagName === 'TEXTAREA') return;
+  try { render(await (await fetch('/api/state')).json()); } catch { document.getElementById('stamp').textContent = 'board server not reachable'; }
+}
+document.addEventListener('change', (e) => { const q = e.target.dataset?.q; if (q) drafts[q].choice = Number(e.target.value); });
+document.addEventListener('input', (e) => { const q = e.target.dataset?.qt; if (q) drafts[q].text = e.target.value; });
+document.addEventListener('click', async (e) => {
+  const id = e.target.dataset?.send;
+  if (!id) return;
+  const d = drafts[id];
+  if (d.choice == null && !d.text.trim()) return;
+  await fetch('/api/answer', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, choice: d.choice, text: d.text }) });
+  delete drafts[id];
+  document.activeElement?.blur();
+  refresh();
+});
+refresh();
+setInterval(refresh, 20000);
+</script>
+</body>
+</html>

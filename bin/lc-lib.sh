@@ -14,3 +14,22 @@ lc_conf() {
   fi
   printf '%s' "${value:-$3}"
 }
+
+# Any key of .agents/project.yaml: a top-level key, or `block.key` one level down.
+# The value stops before an inline comment or a ` — note`. Usage: lc_get <dir> <key> [default]
+lc_get() {
+  local root file value
+  root=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) || root="$1"
+  file="$root/.agents/project.yaml"
+  value=""
+  if [[ -f $file ]]; then
+    value=$(awk -v want="$2" '
+      /^[A-Za-z_-]+:/ { block = $1; sub(/:$/, "", block); key = block }
+      /^  [A-Za-z_-]+:/ { key = block "." $1; sub(/:$/, "", key) }
+      /^ ?[A-Za-z_-]+:|^  [A-Za-z_-]+:/ && key == want {
+        sub(/^[^:]*:[ \t]*/, ""); sub(/[ \t]+#.*$/, ""); sub(/[ \t]+—.*$/, ""); gsub(/^"|"$/, ""); print; exit
+      }' "$file")
+  fi
+  value=${value:-$3}
+  printf '%s' "${value/#\~/$HOME}"
+}

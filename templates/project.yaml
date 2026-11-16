@@ -63,6 +63,10 @@ machine: <limits on heavy commands, if any>
 
 handoff_dir: <directory for briefs/, reports/, intents/, logs/, owner-reads/>
 
+board:                                    # lc-board: the owner's page (kit board/)
+  port: 4777
+  data_dir: <dir for state.json, questions.json, answers.jsonl; default handoff_dir/board>
+
 sessions:                                 # read by lc-spawn, lc-close, lc-view
   tmux_session: <name>
   agent_cmd: claude                       # claude or codex

@@ -44,6 +44,7 @@ The `lifecycle` skill holds the full map of steps, roles and skills.
 | `skills/review-*`, `skills/{duplication,dead-code}-check` | Phase-review dimensions and quality checks |
 | `skills/bootstrap` | A guided, resumable readiness check that takes a repository to ready (`checklist.md`) |
 | `bin/lc-spawn`, `lc-close`, `lc-view` | Start, close and watch agent sessions in tmux |
+| `board/`, `bin/lc-board` | The owner's local page: phases, journeys, changes and criteria from the roadmap, live PRs and sessions, and the open questions with a place to answer them |
 | `templates/` | `project.yaml`, lifecycle, roadmap, acceptance criteria, testing, phase exit, brief, watchdog prompt and running log, CI for the pr, nightly and phase profiles |
 | `docs/adlc.png` | The diagram |
 
