@@ -1,0 +1,23 @@
+# PR profile: CI runs exactly what `verify:pr` runs locally.
+name: PR checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  verify-pr:
+    runs-on: <runner labels>
+    timeout-minutes: <minutes>
+    steps:
+      - uses: actions/checkout@<pinned sha>
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # <toolchain setup>
+      - name: verify:pr
+        run: <cmd> verify:pr

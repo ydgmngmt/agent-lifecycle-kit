@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Close finished agent sessions: their tmux windows and any lc-view sessions on them.
+# Usage: lc-close <name> [<name> ...]   (tmux session: LC_TMUX_SESSION, else the project file of $PWD)
+set -uo pipefail
+[[ $# -ge 1 ]] || { echo "usage: lc-close <name> [<name> ...]" >&2; exit 2; }
+. "$(dirname "$(readlink -f "$0")")/lc-lib.sh"
+session=${LC_TMUX_SESSION:-$(lc_conf "$PWD" tmux_session agents)}
+for w in "$@"; do
+  tmux kill-window -t "$session:$w" 2>/dev/null
+  tmux kill-session -t "view-$w" 2>/dev/null
+  echo "closed $w"
+done

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Show one agent window in this terminal through a grouped tmux session.
+# Usage: lc-view <window-name>   (tmux session: LC_TMUX_SESSION, else the project file of $PWD)
+set -euo pipefail
+[[ $# -eq 1 ]] || { echo "usage: lc-view <window-name>" >&2; exit 2; }
+. "$(dirname "$(readlink -f "$0")")/lc-lib.sh"
+session=${LC_TMUX_SESSION:-$(lc_conf "$PWD" tmux_session agents)}
+w="$1"
+tmux kill-session -t "view-$w" 2>/dev/null || true
+exec tmux new-session -t "$session" -s "view-$w" \; select-window -t "$w"

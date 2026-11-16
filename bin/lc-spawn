@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Start an agent session as a tmux window and hand it its brief.
+# Usage: lc-spawn <name> <workdir> <brief-file>
+# Settings come from the `sessions:` block of <workdir>'s .agents/project.yaml;
+# LC_TMUX_SESSION, LC_AGENT_CMD, LC_MODEL, LC_EFFORT, LC_AGENT_FLAGS override them.
+set -euo pipefail
+[[ $# -eq 3 ]] || { echo "usage: lc-spawn <name> <workdir> <brief-file>" >&2; exit 2; }
+name="$1"; dir="$2"; brief="$3"
+[[ -d $dir ]] || { echo "lc-spawn: no directory $dir" >&2; exit 1; }
+[[ -f $brief ]] || { echo "lc-spawn: no brief $brief" >&2; exit 1; }
+. "$(dirname "$(readlink -f "$0")")/lc-lib.sh"
+
+session=${LC_TMUX_SESSION:-$(lc_conf "$dir" tmux_session agents)}
+agent=${LC_AGENT_CMD:-$(lc_conf "$dir" agent_cmd claude)}
+model=${LC_MODEL:-$(lc_conf "$dir" model)}
+effort=${LC_EFFORT:-$(lc_conf "$dir" effort)}
+flags=${LC_AGENT_FLAGS:-$(lc_conf "$dir" agent_flags)}
+open_tab=${LC_OPEN_TAB:-$(lc_conf "$dir" open_tab)}
+prompt="Read $brief in full and carry out that brief now."
+
+case "$agent" in
+  claude)
+    cmd="claude $flags ${model:+--model $model} ${effort:+--effort $effort} -n $(printf '%q' "$name") $(printf '%q' "$prompt")" ;;
+  codex)
+    cmd="codex $flags ${model:+--model $model} $(printf '%q' "$prompt")" ;;
+  *) echo "lc-spawn: agent_cmd must be claude or codex, not $agent" >&2; exit 1 ;;
+esac
+
+if tmux has-session -t "$session" 2>/dev/null; then
+  tmux new-window -d -t "$session" -n "$name" -c "$dir" "$cmd"
+else
+  tmux new-session -d -s "$session" -n "$name" -x 200 -y 50 -c "$dir" "$cmd"
+fi
+if [[ -n $open_tab ]]; then bash -c "$open_tab" _ "$name" || true; fi
+echo "spawned $name in tmux session $session"

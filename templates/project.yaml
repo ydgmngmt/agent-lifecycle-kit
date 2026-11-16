@@ -1,0 +1,66 @@
+# .agents/project.yaml: this repository's values for the agent-lifecycle-kit.
+# The kit's skills and tools read it; nothing project-specific lives in the kit.
+# Paths are relative to the repository root. Delete a key the project doesn't have.
+
+name: <project name>
+
+docs:
+  agents: AGENTS.md                       # operating model and invariants
+  product: <product doc>                  # what is built and why
+  stories: <user stories>
+  journeys: <user journeys>
+  glossary: GLOSSARY.md
+  decisions: <ADR folder>/
+  roadmap: docs/roadmap.md                # phases, their stories, exit criteria, PRs
+  lifecycle: docs/agents/lifecycle.md     # this project's way of working
+  orchestration: docs/agents/orchestration.md
+  phase_review: docs/agents/phase-review.md
+  phase_records: docs/phase-reviews/      # one record per closed phase
+  testing: TESTING.md
+  review_checklist: docs/review-checklist.md
+  code_map: docs/agents/code-map.md       # which module owns which concept
+  gate_runbook: <gate runbook>
+
+profiles:                                 # one entry point per moment; CI calls pr and nightly
+  commit: <cmd> verify:commit             # before each push: typecheck + specs covering changed files
+  pr: <cmd> verify:pr                     # what PR CI runs
+  phase: <cmd> verify:phase               # the phase run, in order
+  nightly: <cmd> verify:nightly           # full suite on main
+
+checks:
+  duplicates: <cmd>                       # supports --list and --prune
+  dead_code: <cmd>
+  supply_chain: <tool and where it runs>
+
+ci:
+  pr_checks: [<required check names>]     # an empty list is never success
+
+gate:
+  run: <gate command, intent from a file>
+
+merge:
+  command: <merge command with the validated head SHA>
+  who: orchestrator
+
+protected_files: []                       # owner reads every change; own PR
+pinned_files: []                          # change only when a brief schedules it
+sensitive: <where the sensitive paths are listed, or the list>
+
+lanes:
+  list: []                                # stack lanes for sessions; one per checkout
+  ci: <lane reserved for CI, if any>
+  up: <command to bring a stack up on a lane>
+
+browser: <browser tooling for live checks>
+machine: <limits on heavy commands, if any>
+
+handoff_dir: <directory for briefs/, reports/, intents/, logs/, owner-reads/>
+
+sessions:                                 # read by lc-spawn, lc-close, lc-view
+  tmux_session: <name>
+  agent_cmd: claude                       # claude or codex
+  model: <model>
+  effort: <effort>
+  agent_flags: ""
+  max_subagents: <n>                      # how many subagents one session runs at a time
+  owner_read: <command that opens a diff or doc for the owner>
