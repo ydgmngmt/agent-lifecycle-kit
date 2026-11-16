@@ -42,7 +42,7 @@ The `lifecycle` skill holds the full map of steps, roles and skills.
 | `skills/{shape-product,phase-acceptance,agent-brief,commit-check,pr-check,phase-exit}` | One skill per step |
 | `skills/{orchestrator,implementer,live-check,pr-reviewer,phase-run}` | Coordinating and checking roles |
 | `skills/review-*`, `skills/{duplication,dead-code}-check` | Phase-review dimensions and quality checks |
-| `skills/bootstrap` | Sets a repository up from the templates |
+| `skills/bootstrap` | A guided, resumable readiness check that takes a repository to ready (`checklist.md`) |
 | `bin/lc-spawn`, `lc-close`, `lc-view` | Start, close and watch agent sessions in tmux |
 | `templates/` | `project.yaml`, lifecycle, roadmap, acceptance criteria, testing, phase exit, brief, watchdog prompt and running log, CI profiles |
 | `docs/adlc.png` | The diagram |
@@ -64,7 +64,7 @@ Skills are then named `agent-lifecycle-kit:<skill>`.
 
 ## A new repository
 
-In a session in that repository, invoke the `bootstrap` skill. It reads the repository, asks only what it can't derive, writes `.agents/project.yaml`, adds the docs and the four `verify:*` profiles, and points CI at them.
+In a session in that repository, new or existing, invoke the `bootstrap` skill. It maps what the repository already has to the readiness checklist, shows what is present, incomplete or missing, and guides through each open item until the project is ready to start a phase. It never overwrites a file; `.agents/project.yaml` points to the existing ones.
 
 ## Machine-specific pieces
 

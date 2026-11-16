@@ -1,0 +1,24 @@
+# Readiness checklist
+
+In order: a later item often needs an earlier one. "Detect" says what counts as present, under any file name. "Fill" says how a missing item is produced.
+
+| # | Item | Detect | Fill |
+| --- | --- | --- | --- |
+| 1 | **Base skills installed** | `grilling`, `domain-modeling`, `code-review`, `tdd`, `diagnosing-bugs`, `pr`, `writing-for-agents`, `codebase-design`, `prototype`, `research` are among the available skills: the `mattpocock-skills` plugin in Claude Code, or `~/.agents/skills/<name>` for Codex | Name the install: in Claude Code, `/plugin install mattpocock-skills@claude-plugins-official`; for Codex, link the skills of a clone of `mattpocock/skills` into `~/.agents/skills`. Then **stop**: the rest needs them |
+| 2 | **Base skills set up for this repo** | Their setup's outputs: an issue-tracker doc (`docs/agents/issue-tracker.md` or equal), a domain-docs doc (`docs/agents/domain.md`), a triage-labels doc if the `triage` skill is installed, and an "Agent skills" section in `CLAUDE.md` or `AGENTS.md` pointing to them | The person runs `/setup-matt-pocock-skills` (user-invoked); come back after it |
+| 3 | **Product requirements (PRD)** | A doc stating what is built and for whom, under any name (`PRD.md`, `PRODUCT.md`, `docs/prd/`) | `grilling` with the owner, written as the PRD |
+| 4 | **User stories** | Numbered stories stating the wanted behaviour, inside the PRD or beside it | `grilling` + `domain-modeling` (`shape-product`) |
+| 5 | **User journeys** | Journeys that group the stories: each story belongs to at least one | `shape-product` |
+| 6 | **Glossary** | `GLOSSARY.md`, or what the domain-docs doc names | `domain-modeling` |
+| 7 | **Decision records** | The ADR folder the domain-docs doc names, with an index | `domain-modeling` creates it with the first decision |
+| 8 | **Roadmap with phases** | A doc listing phases, each with its stories and state | `templates/roadmap.md`, filled with `shape-product` |
+| 9 | **Current phase's acceptance criteria** | User outcomes, failure cases and invariants, numbered, agreed with the owner, in the roadmap or a linked file | `phase-acceptance` with `templates/acceptance.md` |
+| 10 | **Test rules** | A testing doc saying how flows are verified and which tests are written | `templates/testing.md`; on a clash with the existing doc, list it for the owner |
+| 11 | **Verify profiles** | Four entry points (`verify:commit`, `verify:pr`, `verify:phase`, `verify:nightly`, or equal) that exist **and run**: run commit and pr, and record their time | Thin scripts over the commands the repo already has (`templates/ci/` shows the shape) |
+| 12 | **CI on the profiles** | The PR workflow calls the pr profile; a scheduled nightly calls the nightly profile and reports failures as an issue | `templates/ci/pr.yml`, `templates/ci/nightly.yml` |
+| 13 | **Review docs** | A per-change review checklist; a phase-review procedure; a code map naming each concept's owner and the sensitive paths | `templates/phase-review.md`; the checklist and code map from the repo's own rules, with `codebase-design` |
+| 14 | **Protected files, lanes, gate** | Protected files named (gate config or a doc); stack lanes named, or "no shared stack"; the gate configured, or stated as absent | Ask the owner; record pointers |
+| 15 | **Session tooling** | `lc-spawn` on the PATH and runnable (`lc-spawn` with no arguments prints its usage); the handoff directory exists with `briefs/` and `reports/`; the watchdog prompt (`templates/watchdog-prompt.md`) filled in for this project | `install.sh`; create the directory; fill the template into the handoff directory |
+| 16 | **Project file** | `.agents/project.yaml` with every key a pointer or a literal, no `<…>` left | Built up item by item above |
+| 17 | **Agent instruction files point to the lifecycle** | `AGENTS.md` and/or `CLAUDE.md` link the lifecycle doc and `.agents/project.yaml` | One line each; if they are protected, their own PR for the owner |
+| 18 | **Lifecycle doc** | A way-of-working page with the ADLC order and which skill fires at each step | `templates/lifecycle.md`, with the diagram `docs/adlc.png` beside it |
