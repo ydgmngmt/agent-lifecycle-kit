@@ -1,11 +1,14 @@
 {
   "name": "agent-lifecycle-kit",
-  "owner": { "name": "agent-lifecycle-kit maintainers" },
+  "owner": {
+    "name": "agent-lifecycle-kit maintainers"
+  },
   "plugins": [
     {
       "name": "agent-lifecycle-kit",
       "description": "An agent-driven development lifecycle: step and role skills, session tooling and a bootstrap for new repositories.",
-      "source": "./"
+      "source": "./",
+      "license": "MIT"
     }
   ]
 }

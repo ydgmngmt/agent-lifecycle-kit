@@ -2,6 +2,12 @@
   "name": "agent-lifecycle-kit",
   "version": "0.7.1",
   "description": "ADLC, the agent-driven development lifecycle: an orchestrator with implementer sessions, three verification gates (commit, PR, phase exit), step and role skills, session tooling, and a bootstrap for new repositories.",
-  "license": "UNLICENSED",
-  "keywords": ["lifecycle", "orchestration", "review", "verification", "skills"]
+  "license": "MIT",
+  "keywords": [
+    "lifecycle",
+    "orchestration",
+    "review",
+    "verification",
+    "skills"
+  ]
 }
