@@ -94,6 +94,7 @@ board:                                    # lc-board: the owner's page (kit boar
   running_log: <the phase's running log; the keeper reads its new lines with lc-board log>
   keeper_model: <a cheap model for the board keeper>
   keeper_effort: low
+  # keeper_flags: <extra agent flags; default: no MCP servers, no settings, only the kit's skills>
 
 sessions:                                 # read by lc-spawn, lc-close, lc-view
   tmux_session: <name>

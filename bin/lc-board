@@ -36,7 +36,10 @@ case "$cmd" in
   keeper)
     brief=$data/keeper-brief.md
     printf '# Board keeper for %s\n\nInvoke the `board-keeper` skill and follow it. Repository: %s. Wait for the word `tick`.\n' "$(basename "$root")" "$root" >"$brief"
-    LC_MODEL=${LC_MODEL:-$(lc_get "$root" board.keeper_model)} LC_EFFORT=${LC_EFFORT:-$(lc_get "$root" board.keeper_effort)} \
+    # A small context: no MCP servers, no user or project settings, only this kit's skills.
+    # Measured on one repository: 44k tokens of fixed context per call by default, 26k this way.
+    flags="$(lc_conf "$root" agent_flags) $(lc_get "$root" board.keeper_flags "--strict-mcp-config --setting-sources '' --plugin-dir $kit")"
+    LC_AGENT_FLAGS=${LC_AGENT_FLAGS:-$flags} LC_MODEL=${LC_MODEL:-$(lc_get "$root" board.keeper_model)} LC_EFFORT=${LC_EFFORT:-$(lc_get "$root" board.keeper_effort)} \
       exec "$(dirname "$(readlink -f "$0")")/lc-spawn" board-keeper "$root" "$brief" ;;
   *) LC_BOARD_PORT=$port LC_BOARD_DIR=$data exec node "$kit/board/cli.mjs" "$root" "$@" ;;
 esac
