@@ -230,8 +230,13 @@ const commands = {
   log() {
     if (!runningLog || !existsSync(runningLog)) fail('no running log: set board.running_log in .agents/project.yaml');
     const cursor = file('log.cursor');
-    let from = existsSync(cursor) ? Number(readFileSync(cursor, 'utf8')) || 0 : 0;
     const end = statSync(runningLog).size;
+    // The first call starts at the end: the keeper needs what happens from now on, not the history.
+    if (!existsSync(cursor)) {
+      writeFileSync(cursor, String(end));
+      return console.log(`(log cursor set at the end of ${runningLog}; earlier lines skipped)`);
+    }
+    let from = Number(readFileSync(cursor, 'utf8')) || 0;
     if (end < from) from = 0;
     if (end > from) {
       const buf = Buffer.alloc(end - from);

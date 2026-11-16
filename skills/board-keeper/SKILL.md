@@ -10,7 +10,7 @@ You keep the board true (`board` skill) so that the orchestrator doesn't spend i
 On each `tick`:
 
 1. `lc-board stale`: the server's short list of what looks out of date.
-2. `lc-board log`: only the running-log lines added since your last wake. The offset is kept for you.
+2. `lc-board log`: only the running-log lines added since your last wake. The offset is kept for you, and the first call prints nothing. Don't cut its output with `head`: the lines you skip are gone for the next wake.
 3. For each stale entry and each new log line that changes what the board shows, apply one setter (`set headline`, `item`, `journey --note`, `session`, `outcome`). Base the headline on the newest log lines.
 4. Reply with at most three lines: what you set, and what you could not place.
 
