@@ -19,6 +19,11 @@ unlink_own() { # unlink_own <target> <link-path>
   if [[ -L $2 && $(readlink -f "$2") == "$(readlink -f "$1")" ]]; then rm "$2"; echo "removed $2"; fi
 }
 
+# Remove links left by skills the kit no longer has.
+for l in "$skills_dir"/*; do
+  if [[ -L $l && ! -e $l && $(readlink "$l") == "$kit"/skills/* ]]; then rm "$l"; echo "removed stale $l"; fi
+done
+
 action=link
 [[ ${1:-} == --uninstall ]] && action=unlink_own
 for s in "$kit"/skills/*/; do s=${s%/}; $action "$s" "$skills_dir/$(basename "$s")"; done

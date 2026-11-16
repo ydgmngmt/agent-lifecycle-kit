@@ -11,7 +11,8 @@ docs:
   journeys: <user journeys>
   glossary: GLOSSARY.md
   decisions: <ADR folder>/
-  roadmap: docs/roadmap.md                # phases, their stories, exit criteria, PRs
+  roadmap: docs/roadmap.md                # phases, their stories, acceptance criteria, PRs
+  acceptance: docs/acceptance/            # one acceptance-criteria file per phase, if not inline in the roadmap
   lifecycle: docs/agents/lifecycle.md     # this project's way of working
   orchestration: docs/agents/orchestration.md
   phase_review: docs/agents/phase-review.md
@@ -40,11 +41,13 @@ gate:
 
 merge:
   command: <merge command with the validated head SHA>
+  candidate: <merge queue | update the branch from main, then wait for the required checks on the new head>
   who: orchestrator
 
-protected_files: []                       # owner reads every change; own PR
+owner_approval: []                        # protected files: the human owner approves each change before merge; own PR
+protected_files: []                       # files only an owner decision may change (usually the same list)
 pinned_files: []                          # change only when a brief schedules it
-sensitive: <where the sensitive paths are listed, or the list>
+sensitive: <sensitive code paths, approved by an independent reviewer session: where they are listed, or the list>
 
 lanes:
   list: []                                # stack lanes for sessions; one per checkout

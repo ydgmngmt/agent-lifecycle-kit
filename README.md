@@ -1,19 +1,36 @@
-# agent-lifecycle-kit
+# agent-lifecycle-kit: ADLC
 
-A way of working for agent-driven software development, packaged as skills, tools and templates. It knows nothing about any one project; each repository keeps its own values in `.agents/project.yaml`.
+**ADLC (agent-driven development lifecycle)**, packaged as skills, tools and templates. The kit knows nothing about any one project; each repository keeps its own values in `.agents/project.yaml`.
+
+![Agent-driven development lifecycle](docs/adlc.png)
 
 ## The lifecycle
 
-**Work breakdown:** product requirements → user stories → phases → pull requests → commits.
+1. **Product scope:** PRD → user stories → phases.
+2. **Phase acceptance:** agree on the phase's user outcomes, failure cases and invariants. These are its acceptance criteria.
+3. **Agent brief:** scope one small, mergeable change and name its owner.
+4. **Parallel implementation:** an orchestrator session assigns briefs to agent sessions (10+ at peak), each in its own worktree and able to spawn subagents. Status and questions go up; peers coordinate shared files before editing them.
+5. **Verification gates**; a fix at any gate loops back to implementation:
+   - **Commit:** typecheck and run the targeted behaviour tests.
+   - **Pull request and protected merge:**
+     - **Changed flow:** exercised in the browser or the live API.
+     - **PR CI:** build, typecheck, lint, unit tests, boundaries, API contracts, quality baselines and dependency scanning.
+     - **Review:** an independent review of the change and its test evidence.
+     - **Sensitive changes:** approval by the role the project file names (the human owner for protected files, an independent reviewer session for sensitive code paths) and targeted tests for the affected invariants.
+     - **Merge candidate:** the required checks pass with the PR applied to the current main.
+   - **Nightly on main:** the full integration suite.
+   - **Phase exit:**
+     - **Browser E2E:** the phase journeys on a fresh stack at the frozen merged commit.
+     - **Evidence:** pass or fail per acceptance criterion, with traces and the SHA.
+     - **Other checks:** API replay, navigation speed and data volume.
+     - **Phase review:** architecture, reuse, security and quality across the merged PRs.
+     - **Disposition:** failed exit criteria block; other findings become follow-up PRs; each bug found live adds a regression check.
+6. Once the exit criteria pass, the **next phase** starts.
 
-**Coordination:** a phase goes to one orchestrator session. It starts one full session per PR (implementers), each of which may use its own subagents. Sessions report status and questions to the orchestrator. Peers coordinate directly, and decisions go up.
-
-**Verification gates, in order:**
-1. **Commit check**, before each push: typecheck and the specs covering the changed files.
-2. **PR check:** live check of the changed flow, review (a reviewer session on sensitive paths), CI, and merge once review and CI pass.
-3. **Phase exit:** freeze a candidate; run the browser journeys on a fresh stack plus the other suites; review the phase diff by dimension; fix the findings in batched PRs and rerun the affected flows; then close the phase.
-
-**Testing strategy:** browser end-to-end runs first; tests for observable behaviour and regressions; implementation-level tests for core behaviour and security invariants; a regression step for every bug found live; a supply-chain check on dependencies.
+**Testing strategy:**
+- Browser E2E runs are the primary way to find bugs.
+- Keep behaviour regressions at the lowest reliable level.
+- Use focused lower-level tests for core and security invariants.
 
 The `lifecycle` skill holds the full map of steps, roles and skills.
 
@@ -21,13 +38,14 @@ The `lifecycle` skill holds the full map of steps, roles and skills.
 
 | Path | What |
 | --- | --- |
-| `skills/lifecycle` | The lifecycle, the shared finding format and the report format |
-| `skills/{shape-product,cut-phase,commit-check,pr-check,phase-exit}` | One skill per step |
+| `skills/lifecycle` | The lifecycle, the finding format with its dispositions, and the report format |
+| `skills/{shape-product,phase-acceptance,agent-brief,commit-check,pr-check,phase-exit}` | One skill per step |
 | `skills/{orchestrator,implementer,live-check,pr-reviewer,phase-run}` | Coordinating and checking roles |
 | `skills/review-*`, `skills/{duplication,dead-code}-check` | Phase-review dimensions and quality checks |
 | `skills/bootstrap` | Sets a repository up from the templates |
 | `bin/lc-spawn`, `lc-close`, `lc-view` | Start, close and watch agent sessions in tmux |
-| `templates/` | `project.yaml`, lifecycle, roadmap, testing, phase review, brief, watchdog prompt and running log, CI profiles |
+| `templates/` | `project.yaml`, lifecycle, roadmap, acceptance criteria, testing, phase exit, brief, watchdog prompt and running log, CI profiles |
+| `docs/adlc.png` | The diagram |
 
 The step and role skills invoke the [mattpocock-skills](https://github.com/mattpocock/skills) set (`grilling`, `domain-modeling`, `research`, `prototype`, `codebase-design`, `tdd`, `diagnosing-bugs`, `code-review`, `pr`, `writing-for-agents`). Install it alongside this kit.
 

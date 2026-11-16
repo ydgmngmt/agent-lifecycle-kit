@@ -18,8 +18,10 @@ Every review writes findings in this format: the PR reviewer, the phase-review d
 A reviewer's file holds its findings, then **Checked and sound** (one line per area, with the file that shows it) and **Not examined**. A clean result is valid. Every finding has a `path:line`. Give no general advice, and don't invent findings to fill the list.
 
 **Dispositions**, set by whoever merges the lists:
-- **fix:** keeps behaviour.
-- **defect:** the fix changes behaviour.
+- **blocking:** a failed acceptance criterion. It goes back to implementation, and the phase doesn't exit until it passes.
+- **follow-up:** a fix or defect that a follow-up PR takes. It is tracked in the roadmap and doesn't block the exit.
 - **issue:** needs design, or reaches beyond the change.
 - **owner:** a product meaning or rule to decide, with a proposed answer.
 - **rejected:** with one line saying why.
+
+A critical finding (a project invariant can be broken now) goes to the orchestrator at once and is fixed, or accepted by the owner, before anything else.

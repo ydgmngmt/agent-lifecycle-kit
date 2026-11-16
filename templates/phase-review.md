@@ -1,13 +1,13 @@
-# Phase review
+# Phase exit
 
-The check of a phase's integrated result, between its last merge and the phase being closed. A PR's review sees one change; this one sees what the changes add up to. The order is fixed:
+The check of a phase's integrated result against its acceptance criteria, after its last merge. A PR's review sees one change; this one sees what the changes add up to. The order is fixed:
 
-**freeze → evidence → phase run and review → one findings list → fix PRs → rerun the affected flows → close.**
+**freeze → evidence folder → browser E2E and other checks, with the phase review → disposition → fix and retest → exit.**
 
 ## 1. Freeze
-`START` is main before the phase's first merge. `CANDIDATE` is main after its last merge, with green CI. Record both. Everything below reads `CANDIDATE` from a detached worktree.
+`START` is main before the phase's first merge. `CANDIDATE` is main after its last merge, with green CI and a green nightly. Record both. Everything below reads `CANDIDATE` from a detached worktree.
 
-## 2. Evidence
+## 2. Evidence folder
 One session collects the facts every reviewer starts from, without judgment:
 
 ```bash
@@ -21,17 +21,22 @@ git diff -U0 START CANDIDATE -- <quality baseline dir> | grep '^+[^+]' > baselin
 
 Add the last nightly's result.
 
-## 3. Phase run
-`verify:phase` on `CANDIDATE`, on a lane: <steps in order>. A failing step is a finding.
+## 3. Browser E2E and other checks
+`verify:phase` on `CANDIDATE`, on a lane: <steps in order>. It records PASS or FAIL for each acceptance criterion, with traces and the commit SHA, in the phase's acceptance file.
 
-## 4. Review
-One session per dimension, or one session in order for a small phase. Each reads the code at `CANDIDATE`, changes nothing, and doesn't see the other files: owners and layers, reuse, types and boundaries, effects and security, docs and tests, duplication, dead code. Reviewers may use `code-review` with its subagents; its output is rewritten into the finding format.
+## 4. Phase review
+One session per dimension, or one session in order for a small phase. Each reads the code at `CANDIDATE`, changes nothing, and doesn't see the others' files. The dimensions are owners and layers, reuse, types and boundaries, effects and security, docs and tests, duplication, and dead code. Reviewers may use `code-review` with its subagents; its output is rewritten into the finding format.
 
-## 5. One findings list
-The lead reads the cited lines of every finding and gives each a disposition (fix, defect, issue, owner, rejected). The list is then closed; anything found later becomes an issue. A critical finding goes to the orchestrator at once.
+## 5. Disposition
+The lead reads the cited lines of every finding and gives each a disposition:
+- A failed acceptance criterion is **blocking**.
+- A fix or defect becomes a **follow-up** PR, tracked in the roadmap, and doesn't block.
+- The rest is an **issue**, **owner** or **rejected**.
 
-## 6. Fixes
-One PR for the fixes and one for the defects, given to a session by the orchestrator. Each passes the PR check. Each defect is checked live through the path it changes.
+Each bug found live adds a regression check. A critical finding goes to the orchestrator at once.
 
-## 7. Close
-Rerun the phase-run steps that cover the changed flows. The phase is closed when the run passes its exit criteria and the fixes have merged and been rerun. Write the phase record: both commits, the PRs, each finding with its disposition and issue or PR, and the time each step took.
+## 6. Fix and retest
+Blocking failures go back to implementation, through the PR check. The phase-run steps for the affected criteria are rerun at the new candidate.
+
+## 7. Exit
+When every acceptance criterion passes, the phase exits and the next one starts. Write the phase record: both commits, the evidence per criterion, the PRs, each finding with its disposition and follow-up, and the time each step took.
