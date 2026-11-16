@@ -13,7 +13,8 @@
 // What stays in <data dir>/state.json, because no file holds it: a headline, per-phase notes,
 // journey and criterion status not yet shown by a phase run, extra items, and a note per session.
 // Questions for the owner: <data dir>/questions.json; answers are appended to answers.jsonl.
-// Sessions lc-spawn started: <data dir>/spawned.tsv (brief title as default note, branch for PRs).
+// Sessions lc-spawn started: <data dir>/spawned.tsv. A session's note defaults to its brief's title, and
+// its branch finds its PR; a window lc-spawn did not start shows them from its prompt and pane path.
 // GET /api/stale lists what is probably out of date (staleList); board/cli.mjs changes state.json.
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
@@ -266,35 +267,44 @@ const pullRequests = cached(45_000, async () => {
   return JSON.parse(out).map((p) => ({ number: p.number, title: p.title, state: p.state, branch: p.headRefName, checks: checkState(p.statusCheckRollup), mergedAt: p.mergedAt, url: p.url }));
 });
 
+// A window's state from its last screen lines: working (a turn runs), waiting (its turn ended but a
+// background agent or shell it started still runs), idle, or at a usage limit. Its brief and workdir
+// come from spawned.tsv when lc-spawn started it, else from the window itself: the brief from the
+// agent's prompt ("Read <brief> in full", lc-spawn's wording), the workdir from the pane's path.
 const sessions = cached(20_000, async () => {
   if (!tmuxSession) return [];
-  const names = (await run('tmux', ['list-windows', '-t', tmuxSession, '-F', '#W'])).split('\n').filter(Boolean);
+  const spawns = await spawned();
+  const rows = (await run('tmux', ['list-windows', '-t', tmuxSession, '-F', '#W\t#{pane_pid}\t#{pane_current_path}'])).split('\n').filter(Boolean);
   return Promise.all(
-    names.map(async (name) => {
+    rows.map(async (row) => {
+      const [name, pid, path] = row.split('\t');
       const pane = await run('tmux', ['capture-pane', '-p', '-t', `${tmuxSession}:${name}`, '-S', '-25']);
       const lines = pane.split('\n').map((l) => l.trim()).filter(Boolean);
       const working = lines.some((l) => /…\s*\(\d|esc to interrupt/.test(l));
+      const waiting = lines.some((l) => /Waiting for \d+ background|\bshells? still running|· \d+ shells? ·/.test(l));
       const limit = lines.some((l) => /usage limit|limit reached/i.test(l));
-      return { name, state: limit ? 'limit' : working ? 'working' : 'idle' };
+      const state = limit ? 'limit' : working ? 'working' : waiting ? 'waiting' : 'idle';
+      const brief = spawns.get(name)?.brief ?? (await run('ps', ['-o', 'args=', '-p', pid])).match(/\bRead (\S+) in full\b/)?.[1];
+      return { name, state, ...(await describe(brief, spawns.get(name)?.dir ?? path)) };
     }),
   );
 });
 
 // Sessions lc-spawn started: <data dir>/spawned.tsv, one `name<TAB>brief<TAB>workdir` line each
-// (the last line per name wins). A session's default note is its brief's first heading, and its
-// branch is its workdir's branch.
+// (the last line per name wins).
 const spawned = cached(30_000, async () => {
   const out = new Map();
   for (const line of (await text(join(dataDir, 'spawned.tsv'))).split('\n').filter(Boolean)) {
     const [name, brief, dir] = line.split('\t');
     out.set(name, { brief, dir });
   }
-  for (const [name, x] of out) {
-    const title = (await text(x.brief)).match(/^#\s+(.+)$/m)?.[1] ?? '';
-    const branch = x.dir ? (await run('git', ['-C', x.dir, 'rev-parse', '--abbrev-ref', 'HEAD'])).trim() : '';
-    out.set(name, { ...x, title: plain(title), branch });
-  }
   return out;
+});
+
+// A session's default note is its brief's first heading, and its branch is its workdir's branch.
+const describe = async (brief, dir) => ({
+  title: brief ? plain((await text(brief)).match(/^#\s+(.+)$/m)?.[1] ?? '') : '',
+  branch: dir ? (await run('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'])).trim() : '',
 });
 
 const answers = async () =>
@@ -327,7 +337,7 @@ async function snapshot() {
     spawned(),
   ]);
   const prOfBranch = new Map(prs.filter((p) => p.state === 'OPEN').map((p) => [p.branch, p.number]));
-  const sessionPr = (owner) => prOfBranch.get(spawns.get(owner)?.branch);
+  const sessionPr = (owner) => prOfBranch.get(live.find((x) => x.name === owner)?.branch);
   for (const phase of derived.phases) {
     const hand = state.phases?.[phase.id] ?? {};
     phase.items = phase.items.map((it) => {
@@ -347,7 +357,7 @@ async function snapshot() {
     merges: merged,
     prs,
     spawned: [...spawns.keys()],
-    sessions: live.map((x) => ({ ...x, note: state.sessions?.[x.name] || spawns.get(x.name)?.title || '', branch: spawns.get(x.name)?.branch ?? '' })),
+    sessions: live.map(({ title, ...x }) => ({ ...x, note: state.sessions?.[x.name] || title })),
     questions: questions.map((q) => ({ ...q, answer: answered.get(q.id) ?? null, outcome: state.outcomes?.[q.id] ?? null })),
     at: new Date().toISOString(),
   };

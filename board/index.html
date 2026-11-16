@@ -41,7 +41,7 @@
 
   /* status marks: a coloured dot or segment plus a label, never colour alone */
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--track); margin-right: 6px; flex: none; }
-  .dot.done { background: var(--done); } .dot.progress, .dot.running, .dot.working { background: var(--prog); }
+  .dot.done { background: var(--done); } .dot.progress, .dot.running, .dot.working, .dot.waiting { background: var(--prog); }
   .dot.owner, .dot.limit, .dot.hold, .dot.unverified, .dot.closed { background: var(--warn); } .dot.red, .dot.blocked, .dot.failed { background: var(--crit); }
   .tag { display: inline-flex; align-items: center; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--ink2); min-width: 96px; flex: none; }
   .seg { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; background: var(--track); }
@@ -88,7 +88,7 @@
 </main>
 <script>
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const LABEL = { done: 'done', progress: 'in progress', planned: 'planned', owner: 'needs you', blocked: 'blocked', failed: 'failed', moved: 'moved', open: 'open', hold: 'on hold', unverified: 'not verified', closed: 'closed', next: 'next', later: 'later', current: 'now', working: 'working', idle: 'idle', limit: 'at a limit' };
+const LABEL = { done: 'done', progress: 'in progress', planned: 'planned', owner: 'needs you', blocked: 'blocked', failed: 'failed', moved: 'moved', open: 'open', hold: 'on hold', unverified: 'not verified', closed: 'closed', next: 'next', later: 'later', current: 'now', working: 'working', waiting: 'waiting', idle: 'idle', limit: 'at a limit' };
 const tag = (status, text) => `<span class="tag"><i class="dot ${esc(status)}"></i>${esc(text ?? LABEL[status] ?? status)}</span>`;
 const ago = (iso) => { const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000)); return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
 const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);

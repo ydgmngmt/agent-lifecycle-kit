@@ -5,7 +5,7 @@ description: Use when there is a question for the owner, a status the owner shou
 
 # The board
 
-The owner watches the board, not the sessions. One local page per repository (`lc-board start`, `board.port`), served from the kit's `board/`. It derives the phases, journeys, changes and criteria from the roadmap and the acceptance files, PRs and CI from the host, and sessions from tmux. A session's brief title is its default note, and its branch finds its PR. `state.json` keeps only what no file shows, and it changes through `lc-board` setters. Never edit it by hand.
+The owner watches the board, not the sessions. One local page per repository (`lc-board start`, `board.port`), served from the kit's `board/`. It derives the phases, journeys, changes and criteria from the roadmap and the acceptance files, PRs and CI from the host, and sessions from tmux. A session's brief title is its default note, and its branch finds its PR; for a window lc-spawn did not start, the board reads the brief from the agent's prompt (`Read <brief> in full`) and the branch from the window's directory. A session shows as working, waiting (its turn ended but a background agent or shell it started still runs), idle, or at a limit. `state.json` keeps only what no file shows, and it changes through `lc-board` setters. Never edit it by hand.
 
 ## Rules
 
