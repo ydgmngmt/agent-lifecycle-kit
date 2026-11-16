@@ -62,7 +62,7 @@
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const labels = { done: 'done', progress: 'in progress', planned: 'planned', owner: 'needs you', review: 'in review', blocked: 'blocked', failed: 'failed', moved: 'moved', open: 'open' };
 const badge = (status, text) => `<span class="badge ${esc(status)}">${esc(text ?? labels[status] ?? status)}</span>`;
-const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+const ago = (iso) => { const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000)); return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
 const drafts = {}; // unsent answers survive the periodic re-render
 
 function prBadge(pr) {
@@ -115,7 +115,8 @@ function render(data) {
     const passed = criteria.filter((c) => c.status === 'done').length;
     const counted = criteria.filter((c) => c.status !== 'moved').length;
     const journeys = phase.journeys.map((j) => ({ ...j, ...(hand.journeys ?? {})[j.id] }));
-    for (const [id, j] of Object.entries(hand.journeys ?? {})) if (!journeys.some((x) => x.id === id)) journeys.push({ id, ...j });
+    // Journeys only state.json names (no row in the journey index) come first: the owner named them.
+    journeys.unshift(...Object.entries(hand.journeys ?? {}).filter(([id]) => !journeys.some((x) => x.id === id)).map(([id, j]) => ({ id, ...j })));
     const items = [...phase.items.map((it) => ({ ...it, status: it.state })), ...(hand.items ?? [])];
     const folded = phase.status === 'done';
     html += `<section class="panel wide">${folded ? '<details><summary>' : ''}<h2 style="display:inline">${esc(phase.name)} ${badge(phase.status)}</h2>${folded ? '</summary>' : ''}<div class="muted">${esc(phase.goal)}</div>`;
