@@ -30,6 +30,16 @@ lc_get() {
         sub(/^[^:]*:[ \t]*/, ""); sub(/[ \t]+#.*$/, ""); sub(/[ \t]+—.*$/, ""); gsub(/^"|"$/, ""); print; exit
       }' "$file")
   fi
-  value=${value:-$3}
+  value=${value:-${3:-}}
   printf '%s' "${value/#\~/$HOME}"
+}
+
+# The board's data dir: board.data_dir, else <handoff_dir>/board, else <repo>/.agents/board;
+# LC_BOARD_DIR overrides it. Usage: lc_board_dir <dir>
+lc_board_dir() {
+  local root handoff data
+  root=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) || root="$1"
+  handoff=$(lc_get "$root" handoff_dir)
+  data=${LC_BOARD_DIR:-$(lc_get "$root" board.data_dir "${handoff:+$handoff/board}")}
+  printf '%s' "${data:-$root/.agents/board}"
 }

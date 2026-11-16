@@ -42,10 +42,11 @@ The `lifecycle` skill holds the full map of steps, roles and skills.
 | `skills/{shape-product,phase-acceptance,agent-brief,commit-check,pr-check,phase-exit}` | One skill per step |
 | `skills/{orchestrator,implementer,live-check,pr-reviewer,phase-run}` | Coordinating and checking roles |
 | `skills/review-*`, `skills/{duplication,dead-code}-check` | Phase-review dimensions and quality checks |
+| `skills/board`, `skills/board-keeper` | How every session uses the owner's board (questions, same-turn status, answers with outcomes, nothing unverified shown as done), and the cheap keeper session that keeps it true with `lc-board` setters |
 | `skills/update-docs` | "Update the docs": one sweep that brings the domain docs and the lifecycle docs in line with what was decided and built since the last run |
 | `skills/bootstrap` | A guided, resumable readiness check that takes a repository to ready (`checklist.md`) |
 | `bin/lc-spawn`, `lc-close`, `lc-view` | Start, close and watch agent sessions in tmux |
-| `board/`, `bin/lc-board` | The owner's local page: phases, journeys, changes and criteria from the roadmap, live PRs and sessions, and the open questions with a place to answer them |
+| `board/`, `bin/lc-board` | The owner's local page: phases, journeys, changes and criteria from the roadmap, live PRs and sessions, and the open questions with a place to answer them. `lc-board` also has one-line setters, `answers --wait`, `stale` and `keeper` |
 | `templates/` | `project.yaml`, lifecycle, roadmap, acceptance criteria, testing, phase exit, brief, watchdog prompt and running log, CI for the pr, nightly and phase profiles |
 | `docs/adlc.png` | The diagram |
 

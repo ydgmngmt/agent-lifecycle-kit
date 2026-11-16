@@ -74,6 +74,7 @@ When the owner or the orchestrator says "update the docs", it means one sweep: b
 | Coordination | `orchestrator` | `writing-for-agents`, `grilling` |
 | New repository | `bootstrap` | `grilling` |
 | "Update the docs" | `update-docs` | `domain-modeling` |
+| Board | `board`, `board-keeper` | none |
 
 Base skills are the `mattpocock-skills` set: `mattpocock-skills:<name>` in Claude Code, or the bare `<name>` where they are installed as user skills (Codex reads `~/.agents/skills`).
 

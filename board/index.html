@@ -219,10 +219,10 @@ function render(data) {
   html += `<section class="panel s4"><h2>Open pull requests</h2>${openPrs.map((p) => `<div class="row">${tag(p.checks === 'green' ? 'done' : p.checks === 'red' ? 'red' : 'running', p.checks === 'green' ? 'CI green' : p.checks === 'red' ? 'CI red' : 'CI running')}<div class="grow truncate"><a href="${esc(p.url)}" target="_blank">#${p.number}</a> ${esc(p.title)}</div></div>`).join('') || '<div class="muted">none</div>'}</section>`;
   const merged = data.prs.filter((p) => p.state === 'MERGED' && Date.now() - new Date(p.mergedAt) < 864e5).sort((a, b) => b.mergedAt.localeCompare(a.mergedAt));
   html += `<section class="panel s4"><h2>Merged in the last 24 h</h2>${merged.slice(0, 14).map((p) => `<div class="row">${tag('done', ago(p.mergedAt))}<div class="grow truncate"><a href="${esc(p.url)}" target="_blank">#${p.number}</a> ${esc(p.title)}</div></div>`).join('') || '<div class="muted">none</div>'}${merged.length > 14 ? `<div class="muted small">and ${merged.length - 14} more</div>` : ''}</section>`;
-  html += `<section class="panel s4"><h2>Sessions</h2>${data.sessions.map((x) => `<div class="row">${tag(x.state)}<div class="grow"><strong>${esc(x.name)}</strong><div class="muted small">${esc((s.sessions ?? {})[x.name] ?? '')}</div></div></div>`).join('')}</section>`;
+  html += `<section class="panel s4"><h2>Sessions</h2>${data.sessions.map((x) => `<div class="row">${tag(x.state)}<div class="grow"><strong>${esc(x.name)}</strong><div class="muted small">${esc(x.note ?? '')}</div></div></div>`).join('')}</section>`;
   if (phase.main.length && phase.journeys.length) html += `<section class="panel"><details><summary>Journeys of the journey index in this phase (${phase.journeys.length})</summary>${phase.journeys.map((j) => `<div class="row">${tag((hand.journeys ?? {})[j.id]?.status ?? 'open')}<div class="grow"><strong>${esc(j.id)}</strong> ${esc(j.name)}</div></div>`).join('')}</details></section>`;
   html += `<section class="panel"><details><summary>Acceptance criteria (${passing} of ${counted.length} verified)${phase.acceptance ? ` · ${esc(phase.acceptance)}` : ''}</summary>${criteria.map((c) => `<div class="row">${tag(c.status)}<div class="grow"><strong>${esc(c.id)}</strong> ${esc(c.text)}</div></div>`).join('')}</details></section>`;
-  if (answered.length) html += `<section class="panel"><h2>Your answers</h2>${answered.map((q) => `<div class="row">${tag('done', ago(q.answer.at))}<div class="grow">${esc(q.title)}<div class="ink2 small">${esc(q.answer.choice != null ? q.options[q.answer.choice]?.label : '')} ${esc(q.answer.text)}</div></div></div>`).join('')}</section>`;
+  if (answered.length) html += `<section class="panel"><h2>Your answers</h2>${answered.map((q) => `<div class="row">${tag('done', ago(q.answer.at))}<div class="grow">${esc(q.title)}<div class="ink2 small">${esc(q.answer.choice != null ? q.options[q.answer.choice]?.label : '')} ${esc(q.answer.text)}${q.outcome ? `<div class="small">Done: ${esc(q.outcome.text)}</div>` : '<div class="muted small">Not acted on yet</div>'}</div></div></div>`).join('')}</section>`;
   document.getElementById('app').innerHTML = html;
 }
 
@@ -253,7 +253,7 @@ document.addEventListener('click', async (e) => {
   refresh();
 });
 refresh();
-setInterval(refresh, 20000);
+setInterval(refresh, 5000);
 </script>
 </body>
 </html>

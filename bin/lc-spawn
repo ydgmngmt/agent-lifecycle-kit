@@ -26,6 +26,10 @@ case "$agent" in
   *) echo "lc-spawn: agent_cmd must be claude or codex, not $agent" >&2; exit 1 ;;
 esac
 
+# The board shows the brief's title as the session's note and finds its PR from the branch.
+board=$(lc_board_dir "$dir")
+if [[ -d $board ]]; then printf '%s\t%s\t%s\n' "$name" "$(readlink -f "$brief")" "$(cd "$dir" && pwd)" >>"$board/spawned.tsv"; fi
+
 if tmux has-session -t "$session" 2>/dev/null; then
   tmux new-window -d -t "$session" -n "$name" -c "$dir" "$cmd"
 else

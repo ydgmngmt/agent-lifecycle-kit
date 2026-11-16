@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Start, stop or check the ADLC board for a repository (board/server.mjs).
-# Usage: lc-board start|stop|status [repo dir, default .]
+# The ADLC board for the repository in the current directory (board/server.mjs, board/cli.mjs).
+#   lc-board start|stop|status [repo dir]   the server; start does nothing when it already runs
+#   lc-board keeper                         start the board-keeper session (board.keeper_model)
+#   lc-board set|item|journey|criterion|session|ask|outcome|answers|stale|log …
+#                                           one-line updates and reads; see board/cli.mjs
 # Port and data dir come from .agents/project.yaml (board.port, board.data_dir, else
 # <handoff_dir>/board); LC_BOARD_PORT and LC_BOARD_DIR override them.
 set -euo pipefail
-cmd=${1:-status}; dir=$(cd "${2:-.}" && pwd)
+cmd=${1:-status}
+case "$cmd" in start|stop|status|keeper) dir=$(cd "${2:-.}" && pwd) ;; *) dir=$PWD ;; esac
 . "$(dirname "$(readlink -f "$0")")/lc-lib.sh"
 kit=$(dirname "$(dirname "$(readlink -f "$0")")")
 root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || echo "$dir")
 port=${LC_BOARD_PORT:-$(lc_get "$root" board.port 4777)}
-handoff=$(lc_get "$root" handoff_dir)
-data=${LC_BOARD_DIR:-$(lc_get "$root" board.data_dir "${handoff:+$handoff/board}")}
-data=${data:-$root/.agents/board}
+data=$(lc_board_dir "$root")
 pidfile=$data/server.pid
 running() { [[ -f $pidfile ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; }
 
@@ -31,5 +33,10 @@ case "$cmd" in
     if running; then kill "$(cat "$pidfile")"; rm -f "$pidfile"; echo stopped; else echo "board not running"; fi ;;
   status)
     if running; then echo "running (pid $(cat "$pidfile")) on http://localhost:$port, data $data"; else echo "not running; data $data"; exit 1; fi ;;
-  *) echo "usage: lc-board start|stop|status [repo dir]" >&2; exit 2 ;;
+  keeper)
+    brief=$data/keeper-brief.md
+    printf '# Board keeper for %s\n\nInvoke the `board-keeper` skill and follow it. Repository: %s. Wait for the word `tick`.\n' "$(basename "$root")" "$root" >"$brief"
+    LC_MODEL=${LC_MODEL:-$(lc_get "$root" board.keeper_model)} LC_EFFORT=${LC_EFFORT:-$(lc_get "$root" board.keeper_effort)} \
+      exec "$(dirname "$(readlink -f "$0")")/lc-spawn" board-keeper "$root" "$brief" ;;
+  *) LC_BOARD_PORT=$port LC_BOARD_DIR=$data exec node "$kit/board/cli.mjs" "$root" "$@" ;;
 esac

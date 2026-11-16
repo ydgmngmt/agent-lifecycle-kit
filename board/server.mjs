@@ -13,36 +13,19 @@
 // What stays in <data dir>/state.json, because no file holds it: a headline, per-phase notes,
 // journey and criterion status not yet shown by a phase run, extra items, and a note per session.
 // Questions for the owner: <data dir>/questions.json; answers are appended to answers.jsonl.
+// Sessions lc-spawn started: <data dir>/spawned.tsv (brief title as default note, branch for PRs).
+// GET /api/stale lists what is probably out of date (staleList); board/cli.mjs changes state.json.
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { readFile, appendFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { loadConfig } from './config.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(process.argv[2] ?? process.cwd());
 
-// --- .agents/project.yaml: the few keys the board reads (two levels, `key: value`) -------------
-const conf = {};
-try {
-  let block = '';
-  for (const line of (await readFile(join(repo, '.agents/project.yaml'), 'utf8')).split('\n')) {
-    const m = line.match(/^( *)([\w-]+):\s*(.*)$/);
-    if (!m) continue;
-    const value = m[3].replace(/\s+#.*$/, '').replace(/\s+—.*$/, '').replace(/^["']|["']$/g, '').trim();
-    if (!m[1]) block = m[2];
-    conf[m[1] ? `${block}.${m[2]}` : m[2]] = value;
-  }
-} catch {
-  console.error(`no .agents/project.yaml in ${repo}; using defaults`);
-}
-const home = (p) => p?.replace(/^~(?=\/|$)/, homedir());
-const port = Number(process.env.LC_BOARD_PORT || conf['board.port'] || 4777);
-const dataDir = home(process.env.LC_BOARD_DIR || conf['board.data_dir'] || (conf.handoff_dir && `${conf.handoff_dir}/board`) || join(repo, '.agents/board'));
-const tmuxSession = process.env.LC_TMUX_SESSION || conf['sessions.tmux_session'] || '';
-const roadmapPath = conf['docs.roadmap'] && join(repo, conf['docs.roadmap']);
-const journeysPath = conf['docs.journeys'] && join(repo, conf['docs.journeys']);
+const { conf, port, dataDir, tmuxSession, roadmapPath, journeysPath } = loadConfig(repo);
 
 // --- helpers ---------------------------------------------------------------------------------
 const run = (cmd, args) =>
@@ -297,6 +280,23 @@ const sessions = cached(20_000, async () => {
   );
 });
 
+// Sessions lc-spawn started: <data dir>/spawned.tsv, one `name<TAB>brief<TAB>workdir` line each
+// (the last line per name wins). A session's default note is its brief's first heading, and its
+// branch is its workdir's branch.
+const spawned = cached(30_000, async () => {
+  const out = new Map();
+  for (const line of (await text(join(dataDir, 'spawned.tsv'))).split('\n').filter(Boolean)) {
+    const [name, brief, dir] = line.split('\t');
+    out.set(name, { brief, dir });
+  }
+  for (const [name, x] of out) {
+    const title = (await text(x.brief)).match(/^#\s+(.+)$/m)?.[1] ?? '';
+    const branch = x.dir ? (await run('git', ['-C', x.dir, 'rev-parse', '--abbrev-ref', 'HEAD'])).trim() : '';
+    out.set(name, { ...x, title: plain(title), branch });
+  }
+  return out;
+});
+
 const answers = async () =>
   (await text(join(dataDir, 'answers.jsonl'))).split('\n').filter(Boolean).flatMap((l) => {
     try {
@@ -311,33 +311,95 @@ const send = (res, status, type, body) => {
   res.end(body);
 };
 
+// Everything the page shows, with the hand-kept state laid over what is derived:
+//   a roadmap row's override (state.phases[id].overrides[label]) replaces its pr, status, owner, note;
+//   an item with an owner session but no PR gets the open PR on that session's branch;
+//   a session's note is the hand-kept one, else its brief's title.
+async function snapshot() {
+  const [state, derived, questions, given, prs, live, merged, spawns] = await Promise.all([
+    json('state.json', {}),
+    roadmap(),
+    json('questions.json', []),
+    answers(),
+    pullRequests(),
+    sessions(),
+    merges(),
+    spawned(),
+  ]);
+  const prOfBranch = new Map(prs.filter((p) => p.state === 'OPEN').map((p) => [p.branch, p.number]));
+  const sessionPr = (owner) => prOfBranch.get(spawns.get(owner)?.branch);
+  for (const phase of derived.phases) {
+    const hand = state.phases?.[phase.id] ?? {};
+    phase.items = phase.items.map((it) => {
+      const ov = hand.overrides?.[it.label] ?? {};
+      const next = { ...it, ...ov, state: ov.status ?? it.state };
+      return next.pr || !next.owner ? next : { ...next, pr: sessionPr(next.owner) ?? null };
+    });
+    for (const it of hand.items ?? []) if (!it.pr && it.owner && sessionPr(it.owner)) it.pr = sessionPr(it.owner);
+  }
+  const answered = new Map(given.map((a) => [a.id, a]));
+  return {
+    project: conf.name ?? '',
+    sources: { roadmap: conf['docs.roadmap'] ?? null, journeys: conf['docs.journeys'] ?? null },
+    state,
+    history: derived.history,
+    phases: derived.phases,
+    merges: merged,
+    prs,
+    sessions: live.map((x) => ({ ...x, note: state.sessions?.[x.name] || spawns.get(x.name)?.title || '', branch: spawns.get(x.name)?.branch ?? '' })),
+    questions: questions.map((q) => ({ ...q, answer: answered.get(q.id) ?? null, outcome: state.outcomes?.[q.id] ?? null })),
+    at: new Date().toISOString(),
+  };
+}
+
+// What the board shows that is probably out of date, as a short list for the board keeper.
+function staleList(d) {
+  const out = [];
+  const day = 86_400_000;
+  const prs = new Map(d.prs.map((p) => [p.number, p]));
+  const phase = d.phases.find((p) => p.kind === 'current') ?? d.phases.find((p) => p.kind === 'next');
+  const hand = d.state.phases?.[phase?.id] ?? {};
+  const items = [...(phase?.items ?? []), ...(hand.items ?? []).map((it) => ({ ...it, state: it.status }))];
+  const shown = new Set(items.map((it) => it.pr).filter(Boolean));
+  const live = new Map(d.sessions.map((x) => [x.name, x]));
+  for (const x of d.sessions) {
+    const open = d.prs.find((p) => p.state === 'OPEN' && x.branch && p.branch === x.branch);
+    if (open && !shown.has(open.number)) out.push({ kind: 'pr', id: `#${open.number}`, why: `open PR of session ${x.name} (${open.title}) is on no item` });
+    if (!x.note) out.push({ kind: 'session', id: x.name, why: 'no note and no brief title' });
+  }
+  for (const it of items) {
+    const pr = it.pr ? prs.get(it.pr) : null;
+    const progress = pr?.state === 'OPEN' || (!pr && it.state === 'progress');
+    if (!progress || !it.owner) continue;
+    const s = live.get(it.owner);
+    if (!s) out.push({ kind: 'item', id: it.label, why: `in progress, but session ${it.owner} is closed` });
+    else if (s.state === 'idle' && pr?.state !== 'OPEN') out.push({ kind: 'item', id: it.label, why: `in progress with no open PR, and session ${it.owner} is idle` });
+  }
+  for (const q of d.questions) {
+    if (!q.answer && q.at && Date.now() - Date.parse(q.at) > day) out.push({ kind: 'question', id: q.id, why: 'open for more than a day' });
+    if (q.answer && !q.outcome) out.push({ kind: 'answer', id: q.id, why: 'answered; no outcome on the board yet' });
+  }
+  for (const [jid, j] of Object.entries(hand.journeys ?? {})) {
+    if (!j.note || !j.at) continue;
+    const last = items
+      .filter((it) => (it.j ?? []).includes(jid) && it.pr)
+      .map((it) => prs.get(it.pr)?.mergedAt)
+      .filter(Boolean)
+      .sort()
+      .at(-1);
+    if (last && last > j.at) out.push({ kind: 'journey', id: jid, why: `note older than its last merge (${last.slice(0, 16)})` });
+  }
+  const lastMerge = d.prs.map((p) => p.mergedAt).filter(Boolean).sort().at(-1);
+  const headlineAt = d.state.headlineAt ?? d.state.updated;
+  if (lastMerge && (!headlineAt || headlineAt < lastMerge)) out.push({ kind: 'headline', id: 'headline', why: `older than the last merge (${lastMerge.slice(0, 16)})` });
+  return out;
+}
+
 createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (req.method === 'GET' && url.pathname === '/') return send(res, 200, 'text/html; charset=utf-8', await readFile(join(here, 'index.html')));
-  if (req.method === 'GET' && url.pathname === '/api/state') {
-    const [state, derived, questions, given, prs, live, merged] = await Promise.all([
-      json('state.json', {}),
-      roadmap(),
-      json('questions.json', []),
-      answers(),
-      pullRequests(),
-      sessions(),
-      merges(),
-    ]);
-    const answered = new Map(given.map((a) => [a.id, a]));
-    return send(res, 200, 'application/json', JSON.stringify({
-      project: conf.name ?? '',
-      sources: { roadmap: conf['docs.roadmap'] ?? null, journeys: conf['docs.journeys'] ?? null },
-      state,
-      history: derived.history,
-      phases: derived.phases,
-      merges: merged,
-      prs,
-      sessions: live,
-      questions: questions.map((q) => ({ ...q, answer: answered.get(q.id) ?? null })),
-      at: new Date().toISOString(),
-    }));
-  }
+  if (req.method === 'GET' && url.pathname === '/api/state') return send(res, 200, 'application/json', JSON.stringify(await snapshot()));
+  if (req.method === 'GET' && url.pathname === '/api/stale') return send(res, 200, 'application/json', JSON.stringify(staleList(await snapshot())));
   if (req.method === 'POST' && url.pathname === '/api/answer') {
     // Same origin only: the page is the only caller that may record an answer.
     if (!req.headers.origin || new URL(req.headers.origin).host !== req.headers.host) return send(res, 403, 'text/plain', 'forbidden');

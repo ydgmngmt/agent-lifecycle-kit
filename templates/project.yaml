@@ -91,6 +91,9 @@ handoff_dir: <directory for briefs/, reports/, intents/, logs/, owner-reads/>
 board:                                    # lc-board: the owner's page (kit board/)
   port: 4777
   data_dir: <dir for state.json, questions.json, answers.jsonl; default handoff_dir/board>
+  running_log: <the phase's running log; the keeper reads its new lines with lc-board log>
+  keeper_model: <a cheap model for the board keeper>
+  keeper_effort: low
 
 sessions:                                 # read by lc-spawn, lc-close, lc-view
   tmux_session: <name>
