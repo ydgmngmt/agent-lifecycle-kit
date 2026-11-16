@@ -51,7 +51,7 @@ merge:
 owner_approval: []                        # protected files: the human owner approves each change before merge; own PR
 protected_files: []                       # files only an owner decision may change (usually the same list)
 pinned_files: []                          # change only when a brief schedules it
-sensitive: <sensitive code paths, approved by an independent reviewer session: where they are listed, or the list>
+sensitive: <sensitive code paths, approved by an independent reviewer session (where they are listed, or the list)>
 
 lanes:
   list: []                                # stack lanes for sessions; one per checkout
