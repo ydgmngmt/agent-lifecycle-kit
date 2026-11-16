@@ -42,6 +42,7 @@ The `lifecycle` skill holds the full map of steps, roles and skills.
 | `skills/{shape-product,phase-acceptance,agent-brief,commit-check,pr-check,phase-exit}` | One skill per step |
 | `skills/{orchestrator,implementer,live-check,pr-reviewer,phase-run}` | Coordinating and checking roles |
 | `skills/review-*`, `skills/{duplication,dead-code}-check` | Phase-review dimensions and quality checks |
+| `skills/update-docs` | "Update the docs": one sweep that brings the domain docs and the lifecycle docs in line with what was decided and built since the last run |
 | `skills/bootstrap` | A guided, resumable readiness check that takes a repository to ready (`checklist.md`) |
 | `bin/lc-spawn`, `lc-close`, `lc-view` | Start, close and watch agent sessions in tmux |
 | `board/`, `bin/lc-board` | The owner's local page: phases, journeys, changes and criteria from the roadmap, live PRs and sessions, and the open questions with a place to answer them |

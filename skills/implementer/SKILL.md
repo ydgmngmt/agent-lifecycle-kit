@@ -12,6 +12,7 @@ description: Use when you are a session given a brief to build one pull request.
 5. **Bugs:** invoke `diagnosing-bugs` and reproduce the bug first. **Tests:** keep behaviour regressions at the lowest reliable level, and use focused lower-level tests for core and security invariants (`docs.testing`). Invoke `tdd` for a test-first slice and record the seam and what it catches in the report.
 6. **Subagents** only for independent parts (separate files, a mechanical move, a codebase lookup), at most `sessions.max_subagents` at a time. You check each result yourself. Subagents never gate, push or use a lane.
 7. **Commit check** (`commit-check`) before each push, then **PR check** (`pr-check`): changed flow, review, owner approval if needed, docs, PR body, CI, merge candidate.
+7a. **Docs.** Update the docs your change makes stale in the same PR. If you are asked to "update the docs", that is the `update-docs` sweep, not a note about your change.
 8. **Report** ([report.md](../lifecycle/report.md)) to the orchestrator, and stay available for fixes.
 
 Peers: message other sessions directly about file ownership, lanes and review findings. Anything that changes scope, a product rule or the plan goes to the orchestrator.

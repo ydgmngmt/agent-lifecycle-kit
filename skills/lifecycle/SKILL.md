@@ -56,6 +56,10 @@ The project file records which is which (`ci.enforcement`).
 - Keep behaviour regressions at the lowest reliable level.
 - Use focused lower-level tests for core and security invariants.
 
+## Update the docs
+
+When the owner or the orchestrator says "update the docs", it means one sweep: bring the domain docs and the lifecycle docs (`docs.domain_set`, `docs.lifecycle_set`) in line with what was decided and built since the last run. Invoke `update-docs`.
+
 ## Which skill fires when
 
 | Step | Kit skill | Base skills it invokes |
@@ -69,6 +73,7 @@ The project file records which is which (`ci.enforcement`).
 | Phase exit | `phase-exit`, `phase-run`, the review skills | `code-review`, `codebase-design`, `diagnosing-bugs`, `domain-modeling` |
 | Coordination | `orchestrator` | `writing-for-agents`, `grilling` |
 | New repository | `bootstrap` | `grilling` |
+| "Update the docs" | `update-docs` | `domain-modeling` |
 
 Base skills are the `mattpocock-skills` set: `mattpocock-skills:<name>` in Claude Code, or the bare `<name>` where they are installed as user skills (Codex reads `~/.agents/skills`).
 

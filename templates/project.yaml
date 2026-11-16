@@ -23,6 +23,31 @@ docs:
   review_checklist: docs/review-checklist.md
   code_map: docs/agents/code-map.md       # which module owns which concept
   gate_runbook: <gate runbook>
+  domain_set:                             # "update the docs", set 1 (update-docs)
+    - GLOSSARY.md
+    - <ADR folder>/
+    - <PRD and stories>
+    - <user journeys>
+    - <product principles>
+    - <issue tracker, triage labels and domain-docs setup docs>
+    - <issue tracker: GitHub Issues, or where issues live>
+  lifecycle_set:                          # "update the docs", set 2
+    - docs/agents/lifecycle.md
+    - .agents/project.yaml
+    - docs/roadmap.md
+    - <phase acceptance files>
+    - docs/agents/phase-review.md
+    - <phase records>
+    - docs/agents/orchestration.md
+    - docs/agents/code-map.md
+    - docs/review-checklist.md
+    - TESTING.md
+    - <gate runbook>
+    - AGENTS.md
+    - CLAUDE.md
+
+update_docs:
+  log: docs/agents/docs-updates.md        # one line per "update the docs" run; the next run starts at the last
 
 profiles:                                 # one entry point per moment; CI calls pr and nightly
   commit: <cmd> verify:commit             # before each push: typecheck + specs covering changed files
