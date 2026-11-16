@@ -1,6 +1,8 @@
 # .agents/project.yaml: this repository's values for the agent-lifecycle-kit.
 # The kit's skills and tools read it; nothing project-specific lives in the kit.
 # Paths are relative to the repository root. Delete a key the project doesn't have.
+# Where a value already lives in a repo file, write a pointer to it (`path#section — what to read there`),
+# never a copy: the skills follow the pointer. Only values with no home in the repo are literal.
 
 name: <project name>
 

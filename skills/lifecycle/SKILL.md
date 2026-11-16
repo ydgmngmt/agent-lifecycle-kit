@@ -5,7 +5,7 @@ description: ADLC (agent-driven development lifecycle) and which skill fires at 
 
 # ADLC (agent-driven development lifecycle)
 
-The diagram is [docs/adlc.png](../../docs/adlc.png). The project's values (doc paths, commands, protected files, owner-approval paths, sensitive paths, lanes) are in `.agents/project.yaml`. Read it first; every skill of this kit refers to its keys as `docs.testing`, `profiles.pr` and so on. The project's `docs.lifecycle` page says how each step is done there; where it says more than this skill, it wins.
+The diagram is [docs/adlc.png](../../docs/adlc.png). The project's values (doc paths, commands, protected files, owner-approval paths, sensitive paths, lanes) are in `.agents/project.yaml`. Read it first; every skill of this kit refers to its keys as `docs.testing`, `profiles.pr` and so on. A value is either literal or a pointer to the repo file that holds it (`path#section`, with a note on what to read there). Follow the pointer and use what the file says; the file is the source of truth, never a copy. The project's `docs.lifecycle` page says how each step is done there; where it says more than this skill, it wins.
 
 ## Steps
 
