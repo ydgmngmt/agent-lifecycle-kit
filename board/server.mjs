@@ -346,6 +346,7 @@ async function snapshot() {
     phases: derived.phases,
     merges: merged,
     prs,
+    spawned: [...spawns.keys()],
     sessions: live.map((x) => ({ ...x, note: state.sessions?.[x.name] || spawns.get(x.name)?.title || '', branch: spawns.get(x.name)?.branch ?? '' })),
     questions: questions.map((q) => ({ ...q, answer: answered.get(q.id) ?? null, outcome: state.outcomes?.[q.id] ?? null })),
     at: new Date().toISOString(),
@@ -372,8 +373,9 @@ function staleList(d) {
     const progress = pr?.state === 'OPEN' || (!pr && it.state === 'progress');
     if (!progress || !it.owner) continue;
     const s = live.get(it.owner);
-    if (!s) out.push({ kind: 'item', id: it.label, why: `in progress, but session ${it.owner} is closed` });
-    else if (s.state === 'idle' && pr?.state !== 'OPEN') out.push({ kind: 'item', id: it.label, why: `in progress with no open PR, and session ${it.owner} is idle` });
+    // Only a session lc-spawn started can be closed; an owner that is a person or the orchestrator is not.
+    if (!s && d.spawned.includes(it.owner)) out.push({ kind: 'item', id: it.label, why: `in progress, but session ${it.owner} is closed` });
+    else if (s?.state === 'idle' && pr?.state !== 'OPEN') out.push({ kind: 'item', id: it.label, why: `in progress with no open PR, and session ${it.owner} is idle` });
   }
   for (const q of d.questions) {
     if (!q.answer && q.at && Date.now() - Date.parse(q.at) > day) out.push({ kind: 'question', id: q.id, why: 'open for more than a day' });
@@ -395,7 +397,14 @@ function staleList(d) {
   return out;
 }
 
-createServer(async (req, res) => {
+createServer((req, res) =>
+  handle(req, res).catch((err) => {
+    console.error(err);
+    if (!res.headersSent) send(res, 500, 'text/plain', 'board error; see server.log');
+  }),
+).listen(port, '127.0.0.1', () => console.log(`ADLC board on http://localhost:${port} (data ${dataDir})`));
+
+async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
   if (req.method === 'GET' && url.pathname === '/') return send(res, 200, 'text/html; charset=utf-8', await readFile(join(here, 'index.html')));
   if (req.method === 'GET' && url.pathname === '/api/state') return send(res, 200, 'application/json', JSON.stringify(await snapshot()));
@@ -420,4 +429,4 @@ createServer(async (req, res) => {
     return send(res, 200, 'application/json', '{"ok":true}');
   }
   send(res, 404, 'text/plain', 'not found');
-}).listen(port, '127.0.0.1', () => console.log(`ADLC board on http://localhost:${port} (data ${dataDir})`));
+}

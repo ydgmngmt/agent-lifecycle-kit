@@ -12,7 +12,7 @@ lc_conf() {
         sub(/^[^:]*:[ \t]*/, ""); sub(/[ \t]+#.*$/, ""); gsub(/^"|"$/, ""); print; exit
       }' "$file")
   fi
-  printf '%s' "${value:-$3}"
+  printf '%s' "${value:-${3:-}}"
 }
 
 # Any key of .agents/project.yaml: a top-level key, or `block.key` one level down.
