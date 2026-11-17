@@ -30,3 +30,12 @@ After any upgrade, rerun the `bootstrap` skill: it finds what is missing and wal
 - **Review by kind of diff:** recopy `templates/review/checklist.md`, keeping your project's items: a prose-only diff answers the Docs items, a rules-only diff the Rules items, any other diff all of them.
 - **New key:** `sessions.gate_parallel`, how many gate sessions `lc-gate run` starts at a time; unset, all at once as before.
 - `lc-spawn` says the folder-trust prompt was answered only once the window no longer shows it.
+
+## From 1.3 to 1.4
+
+- **The checklist reviews every PR.** In `gate_pr`, drop the `if sensitive` from the `reviewer` step: `reviewer: session docs/review-checklist.md`. The checklist answers by kind of diff, so a prose-only diff is reviewed against the Docs items and a false statement fails it. Without a review pipeline, the code review is `correctness: session docs/review/correctness.md if flow`, beside it. `lc-gate enforcement` shows a `review` row, on for that step or for an `after-gate` step (an outside review pipeline), either without an `if`.
+- **Rules without a CI host.** Add `rules: command lc-rules check --base $LC_GATE_BASE` to `gate_pr`; it runs at the candidate, judged by the base's rules and baseline. The mechanical rules row is on through it or a workflow, and counts with no host.
+- **`--strict` fails when nothing refuses:** no host requiring the checks and no mode enforcing with its hook on (an `observe <n>` mode still counting included). Its `refusal` row says what is missing.
+- **Local merges.** With no pull requests, the plugin hook checks `git merge <branch>` into the default branch against that branch's PR gate, as it does `gh pr merge`. Rerun `./install.sh` or update the plugin for the new hook entries.
+- **Wizard:** it asks for `sessions.agent_flags` (how gate sessions get permissions unattended), offers `none` for browser, tenants, linter and CI, and puts a decision no rule kind fits into the review checklist as a `(must-fix)` item.
+- **Quieter:** an observe message is told once per commit; a gate session's window closes 10 seconds after its own record (`LC_CLOSE_DELAY`), and `lc-gate run` closes one left open.

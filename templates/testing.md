@@ -2,7 +2,7 @@
 
 ## Strategy
 
-- **Browser end-to-end runs are the primary way to find bugs.** Drive the real flow: sign in, navigate and use the ordinary controls. For a backend flow, use the public API, CLI or event entry and follow it through workers and storage. A rendered component, a successful request or a queued job alone is not success.
+- **Browser end-to-end runs are the primary way to find bugs.** Drive the real flow: sign in, navigate and use the ordinary controls. For a backend flow, or a project with no browser (`browser: none`), use the public API, CLI or event entry and follow it through workers and storage. A rendered component, a successful request or a queued job alone is not success.
 - **Keep behaviour regressions at the lowest reliable level:** the lowest level at which the wrong behaviour can happen and the test stays deterministic.
 - **Use focused lower-level tests for core and security invariants** (<the project's invariants>).
 - Use no mocked success responses, injected state, or internal calls that bypass the behaviour under check. Fixtures may provide prerequisites; label simulated outside dependencies.
@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | `verify:commit` | before each push | typecheck, and the targeted behaviour tests for the changed files |
 | changed flow | every PR that changes behaviour | the affected flow, once, in the browser or the live API |
-| `verify:pr` | every PR, in CI | build, typecheck, lint, unit tests, boundaries, API contracts, quality baselines (dead code, duplication), dependency scanning |
+| `verify:pr` | every PR, in CI (no CI host: a `gate_pr` command step) | build, typecheck, lint (if any), unit tests, boundaries, API contracts, quality baselines (dead code, duplication), dependency scanning |
 | sensitive changes | PRs on protected files or sensitive code paths | targeted tests for the affected invariants; approval by the role the project file names |
 | `verify:nightly` | each night on main, and after a phase's last merge | the full integration suite; a failure becomes an issue |
 | `verify:phase` | phase exit | fresh stack, the phase journeys, API replay, navigation speed, data volume; evidence per acceptance criterion |

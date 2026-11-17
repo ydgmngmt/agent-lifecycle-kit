@@ -11,11 +11,11 @@ git log --first-parent --merges --format='%h %s' START..CANDIDATE > prs.txt
 git diff --name-only START CANDIDATE > files.txt
 git diff START CANDIDATE -- <public entry points, package manifests, API contract> > surface.diff
 git diff -U0 START CANDIDATE -- <quality baseline dir> | grep '^+[^+]' > baseline-grown.txt
-<report-only lint on the phase's files> > phase-lint.txt
+<report-only lint on the phase's files> > phase-lint.txt   # no linter: drop this line
 <each quality check with --list, filtered to files.txt> > baselined.txt
 ```
 
-**Regression run** (`verify:phase` in the phase workflow): <its steps in order, e.g. a fresh stack, the phase journeys, API replay, navigation budgets, data volume last>. It writes one row per acceptance criterion: PASS, FAIL, NOT TESTED or MANUAL, with the trace and the SHA.
+**Regression run** (`verify:phase` in the phase workflow; no CI host: a `gate_phase` command step): <its steps in order, e.g. a fresh stack, the phase journeys, API replay, navigation budgets, data volume last>. It writes one row per acceptance criterion: PASS, FAIL, NOT TESTED or MANUAL, with the trace and the SHA.
 
 **Integration:** <the full integration suite, rerun on `CANDIDATE`>.
 

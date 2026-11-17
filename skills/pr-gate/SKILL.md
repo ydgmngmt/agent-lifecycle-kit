@@ -34,9 +34,9 @@ Exercise the changed flow once through the real thing, with the project's verify
 
 With no flow to show: for docs, every link resolves and each claim is true at the head; for tooling, CI or baselines, the output before and after; for unreachable code, its spec red before and green after.
 
-## Reviewer (sensitive path)
+## Reviewer
 
-A `session` step with the project's checklist (`docs.review_checklist`), never the implementer. It records `fail` on a must-fix finding. Commits after its pass make it stale: the orchestrator reruns it (`lc-close <name>`, then `lc-gate run pr <branch> --rerun <step>`) or carries it with a reason.
+A `session` step with the project's checklist (`docs.review_checklist`) on every PR, by kind of diff, never the implementer. It records `fail` on a must-fix finding. Commits after its pass make it stale: the orchestrator reruns it (`lc-close <name>`, then `lc-gate run pr <branch> --rerun <step>`) or carries it with a reason.
 
 ## Besides the records
 

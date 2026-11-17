@@ -64,7 +64,7 @@ checks:
   supply_chain: <tool and where it runs>
 
 ci:
-  pr_checks: [<required check names>]     # an empty list is never success
+  pr_checks: [<required check names>]     # an empty list is never success; no CI host: delete the ci block, gate_pr's command steps run the checks
   phase_workflow: <workflow file of the phase run, if CI has one>   # templates/ci/phase.yml
   enforcement: <host settings that enforce the gates, or none (by convention only)>
   required_checks: verify-pr pr-body      # CI job names the default branch requires; lc-gate protect sets them
@@ -88,7 +88,7 @@ gate:
 # Modes: off | observe (log and tell) | observe <n> | enforce (refuse). `observe <n>` observes until n
 # PRs have merged with every record, then enforces by itself; the hook says so once. A project that
 # wants refusals from the first PR writes enforce. lc-gate enforcement shows where the count stands.
-gate_pr_mode: observe 3                   # the PR gate's records, at the gate start and at gh pr merge
+gate_pr_mode: observe 3                   # the PR gate's records, at the gate start and at gh pr merge or git merge into main
 gate_pr_plan: observe 3                   # a step ending in `plan`: edits and commits without its plan
 
 paths:                                    # globs separated by spaces; ** spans directories
@@ -101,11 +101,12 @@ paths:                                    # globs separated by spaces; ** spans 
 gate_pr:
   commit-check: command <cmd> verify:commit
   tool-fit: session docs/review/tool-fit.md if mechanism plan   # the author's plan before the first edit; a separate session checks it
-  reviewer: session docs/review-checklist.md if sensitive
+  rules: command lc-rules check --base $LC_GATE_BASE   # .agents/rules.yaml, judged by the base's copy; no CI host needed
+  reviewer: session docs/review-checklist.md   # every PR, by kind of diff: a prose-only diff answers the Docs items
   review: command node .agents/ci/pipeline-passed.mjs review after-gate   # the review pipeline's own result for the head
   live-check: command node .agents/ci/pipeline-passed.mjs test if flow after-gate
-  # With no review pipeline, a separate session reviews instead of the two after-gate steps:
-  # review: session docs/review/correctness.md
+  # With no review pipeline, a separate session reviews the code instead of the two after-gate steps:
+  # correctness: session docs/review/correctness.md if flow
 
 gate_phase:
   freeze: command <script that writes the evidence folder: PR list, files, surface diff, baseline growth, quality lists>
@@ -141,7 +142,7 @@ lanes:
   ci: <lane reserved for CI, if any>
   up: <command to bring a stack up on a lane>
 
-browser: <browser tooling for live checks>
+browser: <browser tooling for live checks, or none (no UI)>
 machine: <limits on heavy commands, if any>
 
 handoff_dir: <directory for briefs/, reports/, intents/, logs/, owner-reads/>
@@ -162,7 +163,7 @@ sessions:                                 # read by lc-spawn, lc-close, lc-view
   gate_model: opus                        # the gate sessions lc-gate run starts; never the lead's LC_MODEL
   gate_effort: xhigh
   # gate_parallel: <n>                    # how many gate sessions lc-gate run starts at a time; unset: all at once
-  agent_flags: ""
+  agent_flags: <how gate sessions get permissions unattended, e.g. --permission-mode auto>   # "": each stops at its first prompt
   max_subagents: <n>                      # how many subagents one session runs at a time
   owner_read: <command that opens a diff or doc for the owner>
   # open_tab: <command that opens a terminal tab on a new session, given its name as $1; unset: none, so spawning never takes focus>

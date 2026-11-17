@@ -1,6 +1,6 @@
 # Review checklist
 
-The project's per-change checklist (`docs.review_checklist`): the question file of the PR gate's reviewer session. Each item carries its severity: a finding on a `(must-fix)` item fails the step; on a `(comment)` item it is a follow-up. Only items are list entries. The phase exit's lessons propose items to add and prune; the owner decides.
+The project's per-change checklist (`docs.review_checklist`): the question file of the PR gate's reviewer session, on every PR. Each item carries its severity: a finding on a `(must-fix)` item fails the step; on a `(comment)` item it is a follow-up. Only items are list entries. The phase exit's lessons propose items to add and prune; the owner decides.
 
 **By kind of diff.** A prose-only diff (docs, no code, config or rules) answers only the Docs items. A diff of only rules and their tests (`.agents/rules.yaml`, its baseline, the rules' tests) answers only the Rules items, in one round: a way around a rule is listed as a comment, not fixed. Any other diff, mixed included, answers every item. A row outside the diff's kind is `no` (naming the kind) and `n/a`.
 
@@ -18,5 +18,5 @@ The project's per-change checklist (`docs.review_checklist`): the question file 
 
 ## The project's rules
 
-7. (must-fix) <a rule a diff can break, e.g. every query filters by tenant>. Where: <paths>.
+7. (must-fix) <a written decision a diff can break that no rule kind fits exactly>. Where: <paths>.
 8. (comment) <a convention, e.g. one way to page a list>.

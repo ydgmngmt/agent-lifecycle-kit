@@ -147,3 +147,26 @@ test('lc-gate run reports a started session that shows no activity for 60 second
   f.pane('Do something\nreading q.md\n');
   assert.doesNotMatch(f.lc('run', 'phase', 'x').stdout, /no activity/);
 });
+
+// A finished gate session's window is closed once its record lands; run closes any left over.
+test("a gate session's window is closed when its record lands, and run closes one left open", async () => {
+  const f = fixture(SESSION);
+  f.pane('working\n');
+  f.lc('run', 'phase', 'x', '--base', 'HEAD');
+  const findings = join(f.repo, 'state/gates/phase/x/findings/review.md');
+  writeFileSync(findings, '| Q1 | Is it right? | yes | q.md:1 | sound |\n');
+  const env = { ...process.env, PATH: `${f.fake}:${KIT}bin:${process.env.PATH}`, LC_SESSION: 'gate-x-review', LC_GATE_STEP: 'phase/x/review', LC_CLOSE_DELAY: '0' };
+  const r = spawnSync('node', [GATE, 'record', 'phase', 'x', 'review', 'pass', '--evidence', findings, '--candidate', 'HEAD'], { cwd: f.repo, encoding: 'utf8', env });
+  assert.equal(r.status, 0, r.stderr);
+  const closed = () => /^kill-window -t agents:gate-x-review$/m.test(f.calls());
+  for (let i = 0; i < 40 && !closed(); i++) await new Promise((ok) => setTimeout(ok, 100));
+  assert.ok(closed(), f.calls());
+  const g = fixture(SESSION);
+  g.pane('working\n');
+  g.lc('run', 'phase', 'x', '--base', 'HEAD');
+  g.windows('@7\tgate-x-review\n');
+  g.sh(`mkdir -p state/gates/phase/x/records && printf '%s' '{"step":"review","status":"pass","sha":"'$(git rev-parse HEAD)'","by":"gate-x-review","at":"t","spawned":true}' > state/gates/phase/x/records/review.json`);
+  const run = g.lc('run', 'phase', 'x');
+  assert.match(g.calls(), /^kill-window -t agents:gate-x-review$/m, run.stdout);
+  assert.match(run.stdout, /closed its window gate-x-review/);
+});

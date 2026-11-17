@@ -14,7 +14,8 @@
 //   lc-gate plan-check [--staged] [--files <path>…]
 //                       exit 1 when a planned gate_pr step applies to these files on this branch and has
 //                       no plan record (gate_pr_plan: enforce); the git pre-commit hook and the edit hook
-//   lc-gate hook        the PreToolUse hook (hooks/hooks.json): the PR gate at its start and at merge;
+//   lc-gate hook        the PreToolUse hook (hooks/hooks.json): the PR gate at its start and at merge
+//                       (gh pr merge, or git merge of a branch into the default branch);
 //                       the plan on every Edit/Write and git commit, and no --no-verify while it applies
 //   lc-gate enforcement [--strict] [--md]
 //                       what makes each gate step binding here, layer by layer, and whether each is on
@@ -332,6 +333,18 @@ function record(repo, [gate, id, step, status, planStatus], flags) {
   if (!g.state.candidate) writeJson(join(g.dir, 'gate.json'), { gate, id, candidate: sha });
   writeJson(join(g.dir, 'records', `${step}.json`), rec);
   console.log(`recorded ${gate} ${id} ${step}: ${status}${rec.carried ? ' (carried)' : ''} for ${sha.slice(0, 12)}`);
+  // The session's work is done: its window closes after LC_CLOSE_DELAY seconds (10), so this command's
+  // output still reaches it.
+  if (own && process.env.LC_SESSION) {
+    const env = { ...process.env, LC_TMUX_SESSION: g.cfg.tmuxSession || 'agents' };
+    spawn('bash', ['-c', 'sleep "$1"; exec "$2" "$3"', '_', process.env.LC_CLOSE_DELAY || '10', join(KIT, 'bin/lc-close'), process.env.LC_SESSION], { detached: true, stdio: 'ignore', env }).unref();
+    console.log(`this window (${process.env.LC_SESSION}) closes in ${process.env.LC_CLOSE_DELAY || '10'}s: stop here`);
+  }
+}
+
+// Closes a finished gate session's tmux window (lc-close).
+function closeWindow(cfg, name) {
+  exec(join(KIT, 'bin/lc-close'), [name], { ok: true, timeout: 10_000, env: { ...process.env, LC_TMUX_SESSION: cfg.tmuxSession || 'agents' } });
 }
 
 // `record <gate> <id> <step> plan --evidence <file>`: the plan of a step whose line ends in `plan`,
@@ -474,7 +487,10 @@ async function run(repo, [gate, idArg], flags) {
     const waits = (s.afterGate || ['command', 'here', 'owner'].includes(s.kind)) && !above;
     if (s.afterGate && !r) say(ctx, s, 'after the pipeline: start the review pipeline once the steps above hold; its result for this head is what this step records');
     if (rerun.has(s.id) && s.kind === 'session') rmSync(join(g.dir, 'briefs', `${s.id}-${sha.slice(0, 12)}.md`), { force: true });
-    if (r && !(s.kind === 'command' && r.status === 'fail' && !waits)) say(ctx, s, `${label(r)}, by ${r.by}${r.reason ? ` (${r.reason})` : ''}`);
+    if (r && s.kind === 'session' && liveWindow(g.cfg, sessionName(ctx, s))) {
+      closeWindow(g.cfg, sessionName(ctx, s));
+      say(ctx, s, `${label(r)}, by ${r.by}; closed its window ${sessionName(ctx, s)}`);
+    } else if (r && !(s.kind === 'command' && r.status === 'fail' && !waits)) say(ctx, s, `${label(r)}, by ${r.by}${r.reason ? ` (${r.reason})` : ''}`);
     else if (!r && s.if && !touches(s.if)) r = put(ctx, s, 'na', '', `no file changed between ${base.slice(0, 12)} and ${sha.slice(0, 12)} matches paths.${s.if}`, 'lc-gate');
     else if (s.kind === 'session' && old && !rerun.has(s.id)) {
       say(ctx, s, `stale: ${label(old)} for ${old.sha.slice(0, 12)}. Rerun it with lc-gate run ${gate} ${id} --rerun ${s.id}, or carry it with lc-gate record ${gate} ${id} ${s.id} pass --carry --reason …`);
@@ -957,11 +973,30 @@ export function planState(repo, { files = [], staged = false, pending = false } 
   return st;
 }
 
+// Whether the observe message for this commit is still unsaid: one commit is seen by the plugin hook
+// (once per matching hook entry) and by the git pre-commit hook, and is told once. Keyed by the branch,
+// its head and the missing steps; an exclusive create, so hooks running at once agree. A day's marks kept.
+function firstTellForCommit(repo, st) {
+  const dir = join(gatesRoot(st.cfg), 'told');
+  mkdirSync(dir, { recursive: true });
+  const head = fastGit(repo, 'rev-parse', '-q', '--verify', 'HEAD').stdout.trim();
+  const key = createHash('sha1').update([repo, st.branch, head, ...st.missing.map((s) => s.id)].join('\n')).digest('hex');
+  try {
+    closeSync(openSync(join(dir, key), 'wx'));
+  } catch (err) {
+    if (err.code === 'EEXIST') return false;
+    throw err;
+  }
+  for (const f of readdirSync(dir)) if (Date.now() - statSync(join(dir, f)).mtimeMs > 86_400_000) rmSync(join(dir, f), { force: true });
+  return true;
+}
+
 // `lc-gate plan-check [--staged] [--files <path>…]`: exit 1 with what is missing when enforce
-// would refuse; in observe mode the same is logged and told, and the exit is 0.
+// would refuse; in observe mode the same is logged and told (for --staged, once per commit), and the exit is 0.
 function planCheck(repo, pos, flags, cwd = process.cwd()) {
   const st = planState(repo, { files: pos.map((f) => resolve(cwd, f)), staged: Boolean(flags.staged) });
   if (!st?.missing.length) return 0;
+  if (st.mode !== 'enforce' && flags.staged && !firstTellForCommit(repo, st)) return 0;
   const log = join(gatesRoot(st.cfg), 'observe.log');
   mkdirSync(dirname(log), { recursive: true });
   appendFileSync(log, JSON.stringify({ at: new Date().toISOString(), point: 'plan', session: process.env.LC_SESSION || '', mode: st.mode, branch: st.branch, missing: st.missing.map((s) => s.id), files: st.files.slice(0, 20), ...(st.mode === 'enforce' ? { refused: true } : {}) }) + '\n');
@@ -1003,6 +1038,34 @@ export function gitCommit(words, cwd) {
     }
   }
   return { cwd, noVerify };
+}
+
+// `git [global options] merge [options] <commit>…` as { cwd, targets }, else null; null too for
+// --abort, --continue, --quit and --skip, which merge nothing new.
+const MERGE_VALUE = new Set(['-m', '-F', '-s', '-X', '--message', '--file', '--strategy', '--strategy-option', '--into-name', '--cleanup']);
+export function gitMerge(words, cwd) {
+  if (!/(^|\/)git$/.test(words[0]?.text ?? '')) return null;
+  let i = 1;
+  for (; i < words.length && words[i].text.startsWith('-'); i++) {
+    const t = words[i].text;
+    if (t === '-C') cwd = resolve(cwd, (words[++i]?.text ?? '').replace(/^~(?=\/|$)/, homedir()));
+    else if (GIT_VALUE_OPTS.has(t)) i++;
+  }
+  if (words[i]?.text !== 'merge') return null;
+  const targets = [];
+  for (i++; i < words.length; i++) {
+    const t = words[i].text;
+    if (['--abort', '--continue', '--quit', '--skip'].includes(t)) return null;
+    if (t === '--') {
+      targets.push(...words.slice(i + 1));
+      break;
+    }
+    if (/^\d*[<>]/.test(t)) {
+      if (/^\d*[<>]+&?$/.test(t)) i++; // a redirection and its file
+    } else if (MERGE_VALUE.has(t)) i++;
+    else if (!t.startsWith('-')) targets.push(words[i]);
+  }
+  return targets.length ? { cwd, targets } : null;
 }
 
 // --- the hook ----------------------------------------------------------------------------------
@@ -1106,6 +1169,7 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
       if (w[0]?.text === 'cd' && w[1] && !w[1].dynamic) cwd = resolve(cwd, w[1].text.replace(/^~(?=\/|$)/, homedir()));
       else if (w[0]?.text === 'no-mistakes' && w[1]?.text === 'axi' && w[2]?.text === 'run') points.push({ point: 'gate start', cwd });
       else if (ghMerge(w)) points.push({ point: 'merge', cwd, ...ghMerge(w) });
+      else if (gitMerge(w, cwd)) for (const target of gitMerge(w, cwd).targets) points.push({ point: 'merge', cwd: gitMerge(w, cwd).cwd, local: target });
       else if (gitCommit(w, cwd)) plans.push({ point: 'commit', ...gitCommit(w, cwd) });
     }
   }
@@ -1126,6 +1190,7 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
       const problems = st.missing.length ? [st.message] : [];
       if (p.noVerify) problems.push(`git commit --no-verify (-n) skips the pre-commit plan check, and step(s) ${st.applies.map((s) => s.id).join(', ')} apply to this commit: commit without it`);
       if (!problems.length) continue;
+      if (st.mode !== 'enforce' && p.point === 'commit' && !firstTellForCommit(repo, st)) continue;
       log = join(gatesRoot(st.cfg), 'observe.log');
       mkdirSync(dirname(log), { recursive: true });
       note({ mode: st.mode, branch: st.branch, missing: st.missing.map((s) => s.id), files: st.files.slice(0, 20), ...(p.noVerify ? { noVerify: true } : {}), ...(st.mode === 'enforce' ? { refused: true } : {}) });
@@ -1158,7 +1223,19 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
       if (said) told.push(said);
       let branch;
       let head;
-      if (p.point === 'merge') {
+      if (p.local) {
+        // git merge: checked only into the default branch, for a branch of this repository.
+        const into = fastGit(p.cwd, 'symbolic-ref', '-q', '--short', 'HEAD').stdout.trim();
+        if (!into || !isMainBranch(repo, into)) continue;
+        if (p.local.dynamic) die(`can't tell which branch \`git merge ${p.local.text}\` merges: the shell expands it`);
+        const t = p.local.text;
+        const local = fastGit(repo, 'rev-parse', '--verify', '-q', `refs/heads/${t}`).status === 0;
+        const remote = !local && fastGit(repo, 'rev-parse', '--verify', '-q', `refs/remotes/${t}`).status === 0;
+        if (!local && !remote) die(`can't tell which branch \`git merge ${t}\` merges: no local or remote branch of that name`);
+        branch = local ? t : t.replace(/^[^/]+\//, '');
+        if (branch === into) continue; // the default branch's own remote copy
+        head = git(repo, 'rev-parse', `${local ? 'refs/heads' : 'refs/remotes'}/${t}^{commit}`);
+      } else if (p.point === 'merge') {
         if (p.target?.dynamic) die(`can't tell which PR \`gh pr merge ${p.target.text}\` merges: the shell expands it`);
         const view = exec('gh', ['pr', 'view', ...(p.target ? [p.target.text] : []), ...p.repo, '--json', 'headRefName,headRefOid'], { cwd: p.cwd, timeout: GH_TIMEOUT });
         ({ headRefName: branch, headRefOid: head } = JSON.parse(view.stdout));

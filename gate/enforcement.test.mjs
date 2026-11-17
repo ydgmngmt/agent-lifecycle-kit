@@ -51,6 +51,8 @@ const FULL = (checks) => JSON.stringify({
 });
 
 const YAML = `handoff_dir: $STATE
+docs:
+  review_checklist: docs/review-checklist.md
 ci:
   required_checks: verify-pr pr-body
 gate_pr_mode: enforce
@@ -59,10 +61,11 @@ paths:
   mechanism: src/**
 gate_pr:
   tool-fit: session docs/review/tool-fit.md if mechanism plan
+  reviewer: session docs/review-checklist.md
   review: command node .agents/ci/pipeline-passed.mjs review after-gate
 gate_phase:
   stack: session docs/review/stack-hunt.md
-protected_files: [.agents/project.yaml, .agents/ci/**, .githooks/pre-commit, .github/workflows/**, docs/review/**]
+protected_files: [.agents/project.yaml, .agents/ci/**, .githooks/pre-commit, .github/workflows/**, docs/review/**, docs/review-checklist.md]
 `;
 
 // A repository with every layer on: workflows for the checks, the git hook, the plugin enabled.
@@ -75,6 +78,7 @@ function repoWith(yaml = YAML, { layers = true } = {}) {
   mkdirSync(join(repo, 'docs/review'), { recursive: true });
   writeFileSync(join(repo, 'docs/review/tool-fit.md'), 'q');
   writeFileSync(join(repo, 'docs/review/stack-hunt.md'), 'q');
+  writeFileSync(join(repo, 'docs/review-checklist.md'), '1. (must-fix) Is every statement true?\n');
   if (layers) {
     mkdirSync(join(repo, '.github/workflows'), { recursive: true });
     writeFileSync(join(repo, '.github/workflows/pr.yml'), 'jobs:\n  verify-pr:\n    steps:\n      - run: bash .agents/ci/from-base.sh "$B" "$H" .lc-kit phase\n');
@@ -156,7 +160,7 @@ test('enforcement: the mechanical rules layer, once .agents/rules.yaml exists', 
   writeFileSync(join(r.repo, '.agents/rules.yaml'), 'rules:\n');
   let out = r.lc(['enforcement', '--strict']);
   assert.equal(out.status, 1);
-  assert.match(line(out.stdout, /^mechanical rules/), /lc-rules check --base.*\boff\b: no workflow runs lc-rules check --base/);
+  assert.match(line(out.stdout, /^mechanical rules/), /lc-rules check --base.*\boff\b: neither a workflow nor a gate_pr command step runs lc-rules check --base/);
   assert.match(line(out.stdout, /^owner reads\s+\.agents\/rules\.yaml/), /\boff\b.*protected_files/);
   writeFileSync(join(r.repo, '.github/workflows/pr.yml'), `${readFileSync(join(r.repo, '.github/workflows/pr.yml'), 'utf8')}      - run: .lc-kit/bin/lc-rules selftest && .lc-kit/bin/lc-rules check --base "$B"\n`);
   out = r.lc(['enforcement']);
@@ -295,6 +299,111 @@ test('the project template: modes observe 3, no here step in gate_pr, the review
   assert.equal(pr.find((s) => s.id === 'tool-fit').plan, true);
   assert.equal(parseSteps(conf, 'phase').find((s) => s.id === 'stack').arg, 'docs/review/stack-hunt.md');
   assert.equal(conf['ci.required_checks'], 'verify-pr pr-body');
+});
+
+// Every PR is reviewed against the checklist, by kind of diff: a prose-only diff included.
+test('the project template: the checklist reviews every PR, and its first Docs item fails a false statement', async () => {
+  const { parseProject } = await import('../board/config.mjs');
+  const { parseSteps, questions } = await import('./gate.mjs');
+  const conf = parseProject(readFileSync(join(KIT, 'templates/project.yaml'), 'utf8'));
+  const pr = parseSteps(conf, 'pr');
+  assert.deepEqual(pr.find((s) => s.id === 'reviewer'), { id: 'reviewer', kind: 'session', arg: conf['docs.review_checklist'], if: null });
+  assert.deepEqual(pr.filter((s) => /correctness/.test(s.arg)), []);
+  assert.match(questions(readFileSync(join(KIT, 'templates/review/checklist.md'), 'utf8'))[0], /^\(must-fix\) Is every statement the diff makes true/);
+});
+
+test('enforcement: the checklist review must run on every PR', () => {
+  const r = repoWith(YAML.replace('  reviewer: session docs/review-checklist.md\n', '  reviewer: session docs/review-checklist.md if mechanism\n').replace(/ {2}review: command .*\n/, ''));
+  r.gh.set('api.json', FULL(['verify-pr', 'pr-body']));
+  let out = r.lc(['enforcement', '--strict']);
+  assert.equal(out.status, 1);
+  assert.match(line(out.stdout, /^review\s/), /every PR.*\boff\b.*session docs\/review-checklist\.md.*or after-gate/);
+  writeFileSync(join(r.repo, '.agents/project.yaml'), YAML.replaceAll('$STATE', `${r.repo}/state`));
+  out = r.lc(['enforcement', '--strict']);
+  assert.equal(out.status, 0, out.stdout);
+  assert.match(line(out.stdout, /^review\s/), /\bon: gate_pr reviewer, the checklist session/);
+});
+
+test('enforcement: an outside review pipeline on every PR (an after-gate step without if) turns the review row on', () => {
+  const yaml = YAML.replace('  reviewer: session docs/review-checklist.md\n', '').replace('  review: command node .agents/ci/pipeline-passed.mjs review after-gate\n', '  gate-review: command test -f reviewed after-gate\n');
+  const r = repoWith(yaml);
+  r.gh.set('api.json', FULL(['verify-pr', 'pr-body']));
+  const out = r.lc(['enforcement', '--strict']);
+  assert.match(line(out.stdout, /^review\s/), /\bon: gate_pr gate-review, an after-gate step/);
+  assert.equal(out.status, 0, out.stdout);
+  const narrowed = repoWith(yaml.replace('test -f reviewed after-gate', 'test -f reviewed if mechanism after-gate'));
+  narrowed.gh.set('api.json', FULL(['verify-pr', 'pr-body']));
+  assert.match(line(narrowed.lc(['enforcement']).stdout, /^review\s/), /\boff\b/);
+});
+
+// The rule check binds without a CI host: a gate_pr command step runs lc-rules check --base.
+test('enforcement: the rules layer is on through a gate_pr command step, and counts without a host', () => {
+  const yaml = YAML.replace(/ci:\n {2}required_checks: .*\n/, '');
+  const r = repoWith(yaml);
+  writeFileSync(join(r.repo, '.agents/rules.yaml'), 'rules:\n');
+  let out = r.lc(['enforcement']);
+  assert.match(line(out.stdout, /^mechanical rules/), /\boff\b.*gate_pr command step/);
+  assert.match(out.stdout, /configured layer\(s\) off:[^]*\.agents\/rules\.yaml, against/);
+  writeFileSync(join(r.repo, '.agents/project.yaml'), yaml.replaceAll('$STATE', `${r.repo}/state`).replace('gate_phase:', '  rules: command lc-rules check --base $LC_GATE_BASE\ngate_phase:'));
+  out = r.lc(['enforcement']);
+  assert.match(line(out.stdout, /^mechanical rules/), /\bon: gate_pr rules\b/);
+});
+
+test('the template rules step fails a candidate that breaks a rule, judged by the base', async () => {
+  const { parseProject } = await import('../board/config.mjs');
+  const { parseSteps } = await import('./gate.mjs');
+  const step = parseSteps(parseProject(readFileSync(join(KIT, 'templates/project.yaml'), 'utf8')), 'pr').find((s) => s.id === 'rules');
+  assert.deepEqual(step, { id: 'rules', kind: 'command', arg: 'lc-rules check --base $LC_GATE_BASE', if: null });
+  const r = repoWith(`handoff_dir: $STATE\ngate_pr:\n  rules: command ${step.arg}\n`, { layers: false });
+  r.git(`mkdir -p docs && echo '# fetch only' > docs/http.md && printf '%s\\n' 'rules:' '  - id: no-axios' '    decision: docs/http.md' '    message: fetch only' '    kind: import' '    package: axios' > .agents/rules.yaml && git add -A && git commit -qm rules`);
+  r.git(`git checkout -q -b feat && mkdir -p src && echo "import axios from 'axios';" > src/a.js && git add -A && git commit -qm axios`);
+  const out = r.lc(['run', 'pr', 'feat'], { PATH: `${KIT}bin:${r.gh.dir}:/usr/bin:/bin` });
+  assert.match(out.stdout, /rules\s+command\s+FAIL/, out.stdout + out.stderr);
+});
+
+// --strict tells the truth: with no host and only observing modes, nothing refuses.
+test('enforcement --strict: exit 1 when no layer can refuse, naming what is missing', () => {
+  const yaml = YAML.replace(/ci:\n {2}required_checks: .*\n/, '').replace('gate_pr_mode: enforce\ngate_pr_plan: enforce\n', 'gate_pr_mode: observe 3\ngate_pr_plan: observe 3\n');
+  const r = repoWith(yaml);
+  const out = r.lc(['enforcement', '--strict']);
+  assert.equal(out.status, 1, out.stdout);
+  assert.doesNotMatch(out.stdout, /every configured layer is on/);
+  const row = line(out.stdout, /^refusal/);
+  assert.match(row, /\boff: nothing refuses/);
+  assert.match(row, /ci\.required_checks is not set/);
+  assert.match(row, /gate_pr_mode observing, 0 of 3/);
+  assert.match(row, /gate_pr_plan observing, 0 of 3/);
+  // An enforcing mode with its hook on can refuse, host or not.
+  writeFileSync(join(r.repo, '.agents/project.yaml'), yaml.replaceAll('$STATE', `${r.repo}/state`).replace('gate_pr_mode: observe 3', 'gate_pr_mode: enforce'));
+  const on = r.lc(['enforcement', '--strict']);
+  assert.match(line(on.stdout, /^refusal/), /\bon: .*Claude Code plugin hook/);
+  assert.equal(on.status, 0, on.stdout);
+});
+
+// A local merge into the default branch is checked like gh pr merge (a project without pull requests).
+test('the merge hook checks git merge of a branch into the default branch', () => {
+  const r = repoWith(COUNTED('enforce'), { layers: false });
+  writeFileSync(join(r.repo, 'q.md'), '1. Is it right?\n');
+  const hook = (command) =>
+    spawnSync(process.execPath, [GATE, 'hook'], { cwd: r.repo, encoding: 'utf8', env: { ...process.env, LC_GATE_STEP: '', PATH: `${r.gh.dir}:/usr/bin:/bin` }, input: JSON.stringify({ tool_name: 'Bash', cwd: r.repo, tool_input: { command } }) });
+  r.git('git checkout -q -b feat && git commit -q --allow-empty -m work && git checkout -q main');
+  for (const cmd of ['git merge feat', 'git merge --no-ff -m "merge feat" feat', `cd ${r.repo} && git merge --squash feat`, `git -C ${r.repo} merge feat`]) {
+    const refused = hook(cmd);
+    assert.equal(refused.status, 2, cmd);
+    assert.match(refused.stderr, /PR gate for feat at [0-9a-f]{12} does not hold:\n {2}review: missing/, cmd);
+  }
+  assert.equal(hook('git merge --abort').status, 0);
+  r.git('git update-ref refs/remotes/origin/main main');
+  for (const cmd of ['git merge --ff-only origin/main', 'git merge origin/main']) assert.equal(hook(cmd).status, 0, `${cmd}: the default branch's own remote copy`);
+  r.git('git checkout -q feat');
+  for (const cmd of ['git merge main', 'git merge --ff-only origin/main', 'git merge --no-edit main']) assert.equal(hook(cmd).status, 0, `${cmd}: into a work branch`);
+  r.git('git checkout -q main');
+  assert.equal(r.lc(['record', 'pr', 'feat', 'review', 'na', '--reason', 'empty', '--candidate', 'feat']).status, 0);
+  assert.equal(hook('git merge feat').status, 0);
+  assert.equal(JSON.parse(readFileSync(join(r.repo, 'state/gates/pr/feat/merged.json'), 'utf8')).complete, true);
+  const hooks = readFileSync(join(KIT, 'hooks/hooks.json'), 'utf8');
+  assert.match(hooks, /Bash\(git merge \*\)/);
+  assert.match(hooks, /Bash\(git -C \* merge \*\)/);
 });
 
 // The PR body check as CI runs it: from-base.sh, the base commit's script, project file and shapes.

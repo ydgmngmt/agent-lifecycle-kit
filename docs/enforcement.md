@@ -32,18 +32,24 @@ Example, from [the project template](../templates/project.yaml):
 ```
 gate_pr:
   tool-fit: session docs/review/tool-fit.md if mechanism plan
+  rules: command lc-rules check --base $LC_GATE_BASE
+  reviewer: session docs/review-checklist.md
   review: command node .agents/ci/pipeline-passed.mjs review after-gate
 ```
 
+The `reviewer` step has no `if`: every PR is reviewed against the checklist, by kind of diff, so a prose-only diff with a false statement fails. The `rules` step runs the mechanical rules at the candidate, judged by the base's copy, with no CI host needed.
+
 ## The modes
 
-`gate_pr_mode` (the PR gate's records, at the gate start and at `gh pr merge`) and `gate_pr_plan` (edits and commits without a required plan) each take `off`, `observe`, `observe <n>` or `enforce`; unset means `observe`.
+`gate_pr_mode` (the PR gate's records, at the gate start, at `gh pr merge` and at a `git merge` of a branch into the default branch) and `gate_pr_plan` (edits and commits without a required plan) each take `off`, `observe`, `observe <n>` or `enforce`; unset means `observe`.
 
 - `observe` logs to `<gates>/observe.log` and tells the session what enforce would refuse.
 - `observe <n>` observes until `<n>` PRs have merged with every record (counted from the merge hook's marks, `gates/pr/<id>/merged.json`), then enforces without an edit; the hook says so once. The template starts at `observe 3`.
 - `enforce` refuses.
 
-The plan check runs on every `Edit`, `Write`, `MultiEdit` and `NotebookEdit` of a file in the repository and on every `git commit`, and refuses `git commit --no-verify` while a planned step applies. Files under `.agents/` never count, so the plan can be written there. Agents without Claude Code hooks get the same check from the git hook: copy `templates/githooks/pre-commit` to `.githooks/pre-commit` and run `git config core.hooksPath .githooks`.
+`lc-gate enforcement --strict` also exits 1 when nothing refuses at all: no host requires the checks and no mode enforces with its hook on. Its `refusal` row names what is missing.
+
+An observe message for a commit is told once, however many hooks see that commit. The plan check runs on every `Edit`, `Write`, `MultiEdit` and `NotebookEdit` of a file in the repository and on every `git commit`, and refuses `git commit --no-verify` while a planned step applies. Files under `.agents/` never count, so the plan can be written there. Agents without Claude Code hooks get the same check from the git hook: copy `templates/githooks/pre-commit` to `.githooks/pre-commit` and run `git config core.hooksPath .githooks`.
 
 ## The commands
 
@@ -52,7 +58,7 @@ The full usage is at the top of [`gate/gate.mjs`](../gate/gate.mjs).
 | Command | What |
 | --- | --- |
 | `lc-gate run <phase\|pr> [id]` | Walk the gate: each step without a record gets the next thing for its kind |
-| `lc-gate record <gate> <id> <step> …` | Record a result, an N/A, a carry or a plan |
+| `lc-gate record <gate> <id> <step> …` | Record a result, an N/A, a carry or a plan; a gate session's own record closes its window after 10 seconds (`LC_CLOSE_DELAY`), and `run` closes any left open |
 | `lc-gate status <gate> <id>` | The table; `--write` generates the phase record, `--trailer` prints `Verified-By` |
 | `lc-gate check <gate> <id>` | Exit 1 listing missing, stale or failed steps; `check phase --diff <base> <head>` is the CI form |
 | `lc-gate plan-check [--staged] [--files <path>…]` | Exit 1 when a planned step applies and the branch has no plan |

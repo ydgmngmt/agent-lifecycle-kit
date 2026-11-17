@@ -9,4 +9,4 @@ Inputs: the evidence folder (changed files, report-only lint on them, the baseli
 3. **Errors.** A fallback that hides a missing value; a catch that changes what an error means to its caller; an error swallowed, or logged and dropped.
 4. **Effects.** A read-then-act outside the effect's transaction; an outside call without an operation ID, a timeout, or a way to reconcile an unknown outcome; a retry that can repeat an effect.
 5. **States with no exit.** A status that an exception, a restart or a stop can leave with no way out, or that more than one place writes.
-6. **Lint.** Report-only lint findings on lines the change added.
+6. **Lint.** Report-only lint findings on lines the change added; with no linter, `n/a`.

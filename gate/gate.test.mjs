@@ -257,6 +257,22 @@ test('observe (the default) logs and lets the edit through', () => {
   assert.equal(p.lc({}, 'plan-check', '--files', 'src/a.js').status, 0);
 });
 
+test('observe tells once per commit, however many hooks see it; a new commit tells again', () => {
+  const p = planned('');
+  p.git('git checkout -q -b feat && mkdir -p src && echo x > src/a.js');
+  const told = (r) => (r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext : '') + r.stderr;
+  const commit = 'git add -A && git commit -m work';
+  assert.match(told(p.hook('Bash', { command: commit })), /observe mode/);
+  for (let i = 0; i < 5; i++) assert.doesNotMatch(told(p.hook('Bash', { command: commit })), /observe mode/);
+  p.git('git add -A');
+  const staged = p.lc({}, 'plan-check', '--staged');
+  assert.equal(staged.status, 0);
+  assert.doesNotMatch(staged.stderr, /observe mode/, 'the git hook of the same commit says nothing more');
+  p.git('git commit -qm work && echo y > src/b.js');
+  assert.match(told(p.hook('Bash', { command: commit })), /observe mode/);
+  assert.match(told(p.edit('src/c.js')), /observe mode/, 'an edit still tells');
+});
+
 test("the lead's N/A plan lets the work through", () => {
   const p = planned('enforce');
   p.git('git checkout -q -b feat && git commit -q --allow-empty -m early');
