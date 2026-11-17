@@ -17,8 +17,8 @@ docs:
   acceptance: docs/acceptance/            # one acceptance-criteria file per phase, if not inline in the roadmap
   lifecycle: docs/agents/lifecycle.md     # this project's way of working
   orchestration: docs/agents/orchestration.md
-  phase_review: docs/agents/phase-review.md
-  phase_records: docs/phase-reviews/      # one record per closed phase
+  phase_review: docs/agents/phase-review.md   # the phase exit's values (templates/phase-review.md)
+  phase_records: docs/phase-reviews/      # lc-gate status phase <id> --write writes <id>.md here
   testing: TESTING.md
   review_checklist: docs/review-checklist.md
   code_map: docs/agents/code-map.md       # which module owns which concept
@@ -67,6 +67,41 @@ ci:
 
 gate:
   run: <gate command, intent from a file>
+
+# The gates' steps (lc-gate). One line per step, in the order they run:
+#   <step>: <kind> <argument> [if <paths key>]
+# kind: command (the runner runs it) · workflow (a CI workflow file, dispatched with -f candidate=<sha>)
+#       · session (a spawned review session; the argument is its question file) · here (done by the
+#       session running the gate; the argument says what) · owner (a board question).
+# `if <key>` runs the step only when the change touches a glob under paths.<key>.
+# Keep " #" and " — " out of a step line: the reader cuts a value there.
+gate_pr_mode: observe                     # off | observe (warn) | enforce (refuse)
+
+paths:                                    # globs separated by spaces; ** spans directories
+  flow: <globs of code a person or agent uses, e.g. apps/web/** packages/api/**>
+  sensitive: <globs of the sensitive code paths>
+
+gate_pr:
+  commit-check: command <cmd> verify:commit
+  self-review: here code-review against the base, the brief as the spec
+  live-check: here the project's verify skill on the changed flow if flow
+  reviewer: session docs/review-checklist.md if sensitive
+
+gate_phase:
+  freeze: command <script that writes the evidence folder: PR list, files, surface diff, baseline growth, quality lists>
+  regression: workflow <phase workflow file>
+  integration: workflow <integration workflow file>
+  built: session <review question files dir>/built-as-described.md
+  correctness: session <review question files dir>/correctness.md
+  security: session <review question files dir>/security.md
+  architecture: session <review question files dir>/architecture.md
+  duplication: session <review question files dir>/duplication.md
+  dead-code: session <review question files dir>/dead-code.md
+  docs: session <review question files dir>/docs.md
+  findings: here one list, every finding with a disposition
+  fix-retest: here blocking findings fixed, affected steps rerun or carried
+  acceptance: owner
+  lessons: here proposed checklist rules, stale rules pruned
 
 merge:
   command: <merge command with the validated head SHA>

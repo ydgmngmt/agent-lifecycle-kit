@@ -1,14 +1,10 @@
-# Phase exit
+# Phase exit: <project name>
 
-The check of a phase's integrated result against its acceptance criteria, after its last merge. A PR's review sees one change; this one sees what the changes add up to. The order is fixed:
+This page holds the project's values for the phase exit; the steps are `gate_phase:` in `.agents/project.yaml`, and the procedure is the kit's `phase-exit` skill. The second half is the shape of the phase record that `lc-gate status phase <id> --write` writes into `docs.phase_records`.
 
-**freeze → evidence folder → browser E2E and other checks, with the phase review → disposition → fix and retest → exit.**
+## The project's values
 
-## 1. Freeze
-`START` is main before the phase's first merge. `CANDIDATE` is main after its last merge, with green CI and a green nightly. Record both. Everything below reads `CANDIDATE` from a detached worktree.
-
-## 2. Evidence folder
-One session collects the facts every reviewer starts from, without judgment:
+**Evidence folder** (the freeze step's script writes it, at `CANDIDATE`, without judgment):
 
 ```bash
 git log --first-parent --merges --format='%h %s' START..CANDIDATE > prs.txt
@@ -19,24 +15,42 @@ git diff -U0 START CANDIDATE -- <quality baseline dir> | grep '^+[^+]' > baselin
 <each quality check with --list, filtered to files.txt> > baselined.txt
 ```
 
-Add the last nightly's result.
+**Regression run** (`verify:phase` in the phase workflow): <its steps in order, e.g. a fresh stack, the phase journeys, API replay, navigation budgets, data volume last>. It writes one row per acceptance criterion: PASS, FAIL, NOT TESTED or MANUAL, with the trace and the SHA.
 
-## 3. Browser E2E and other checks
-`verify:phase` on `CANDIDATE`, on a lane: <steps in order>. It records PASS or FAIL for each acceptance criterion, with traces and the commit SHA, in the phase's acceptance file.
+**Integration:** <the full integration suite, rerun on `CANDIDATE`>.
 
-## 4. Phase review
-One session per dimension, or one session in order for a small phase. Each reads the code at `CANDIDATE`, changes nothing, and doesn't see the others' files. The dimensions are owners and layers, reuse, types and boundaries, effects and security, docs and tests, duplication, and dead code. Reviewers may use `code-review` with its subagents; its output is rewritten into the finding format.
+**Question files:** <where the review question files live>.
 
-## 5. Disposition
-The lead reads the cited lines of every finding and gives each a disposition:
-- A failed acceptance criterion is **blocking**.
-- A fix or defect becomes a **follow-up** PR, tracked in the roadmap, and doesn't block.
-- The rest is an **issue**, **owner** or **rejected**.
+## The phase record (generated)
 
-Each bug found live adds a regression check. A critical finding goes to the orchestrator at once.
+```markdown
+# Phase <id>: <phase name>
 
-## 6. Fix and retest
-Blocking failures go back to implementation, through the PR check. The phase-run steps for the affected criteria are rerun at the new candidate.
+- START <sha> · CANDIDATE <sha> · <date> · lead <session>
+- PRs: <list from prs.txt>
 
-## 7. Exit
-When every acceptance criterion passes, the phase exits and the next one starts. Write the phase record: both commits, the evidence per criterion, the PRs, each finding with its disposition and follow-up, and the time each step took.
+## Steps
+| step | kind | status | commit | by | evidence / reason |
+| --- | --- | --- | --- | --- | --- |
+| <one row per gate_phase step; N/A and carried rows show their reason> |
+
+## Acceptance criteria
+| criterion | result | trace | commit |
+| --- | --- | --- | --- |
+| <phase>-AC1 | PASS / FAIL / NOT TESTED / MANUAL | <path or url> | <sha> |
+
+## Findings
+| id | from step | severity | disposition | follow-up |
+| --- | --- | --- | --- | --- |
+
+## What was built and why
+<from the docs session>
+
+## Acceptance
+<the owner's answer, with its date>
+
+## Lessons
+<proposed checklist rules, rules pruned>
+```
+
+The step evidence files are copied beside the record (`<id>/<step>.<ext>`). A passed check is not acceptance: the record is complete only with the owner's answer.

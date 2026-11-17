@@ -2,7 +2,9 @@
 # The profile writes its per-step logs and traces under $PHASE_OUT, and $PHASE_OUT/evidence.md:
 # one row per acceptance criterion with PASS, FAIL or NOT TESTED, the trace path and the SHA.
 # A step that needs a person or a live model is a row marked MANUAL with what is needed, never skipped silently.
+# lc-gate dispatches it with `-f candidate=<sha>` only and finds the run by the candidate in its run-name.
 name: Phase run
+run-name: Phase run at ${{ inputs.candidate }}
 on:
   workflow_dispatch:
     inputs:
@@ -10,8 +12,9 @@ on:
         description: Full SHA of the frozen candidate
         required: true
       phase:
-        description: Phase id
-        required: true
+        description: Phase id (optional; lc-gate does not pass it)
+        required: false
+        default: ''
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
@@ -41,9 +44,9 @@ jobs:
           PHASE: ${{ inputs.phase }}
           CANDIDATE: ${{ inputs.candidate }}
         run: |
-          { echo "## Phase $PHASE at $CANDIDATE"; cat "$PHASE_OUT/evidence.md" 2>/dev/null || echo "No evidence.md: the run stopped before writing it."; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "## Phase ${PHASE:-run} at $CANDIDATE"; cat "$PHASE_OUT/evidence.md" 2>/dev/null || echo "No evidence.md: the run stopped before writing it."; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@<pinned sha>
         if: always()
         with:
-          name: phase-${{ inputs.phase }}-${{ inputs.candidate }}
+          name: phase-run-${{ inputs.candidate }}
           path: .phase-run/
