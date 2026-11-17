@@ -5,8 +5,30 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "if": "Bash(no-mistakes axi run *)", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/lc-gate\" hook", "timeout": 90 },
-          { "type": "command", "if": "Bash(gh pr merge *)", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/lc-gate\" hook", "timeout": 90 }
+          {
+            "type": "command",
+            "if": "Bash(no-mistakes axi run *)",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/lc-gate\" hook",
+            "timeout": 90
+          },
+          {
+            "type": "command",
+            "if": "Bash(gh pr merge *)",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/lc-gate\" hook",
+            "timeout": 90
+          },
+          {
+            "type": "command",
+            "if": "Bash(gh -R * pr merge *)",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/lc-gate\" hook",
+            "timeout": 90
+          },
+          {
+            "type": "command",
+            "if": "Bash(gh --repo * pr merge *)",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/lc-gate\" hook",
+            "timeout": 90
+          }
         ]
       }
     ]
