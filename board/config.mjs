@@ -4,18 +4,25 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+// The project file's text as { key or block.key: value }, in file order.
+export function parseProject(text) {
+  const conf = {};
+  let block = '';
+  for (const line of text.split('\n')) {
+    const m = line.match(/^( *)([\w-]+):\s*(.*)$/);
+    if (!m) continue;
+    const value = m[3].replace(/\s+#.*$/, '').replace(/\s+—.*$/, '').replace(/^["']|["']$/g, '').trim();
+    if (!m[1]) block = m[2];
+    conf[m[1] ? `${block}.${m[2]}` : m[2]] = value;
+  }
+  return conf;
+}
+
 export function loadConfig(repoDir) {
   const repo = resolve(repoDir);
-  const conf = {};
+  let conf = {};
   try {
-    let block = '';
-    for (const line of readFileSync(join(repo, '.agents/project.yaml'), 'utf8').split('\n')) {
-      const m = line.match(/^( *)([\w-]+):\s*(.*)$/);
-      if (!m) continue;
-      const value = m[3].replace(/\s+#.*$/, '').replace(/\s+—.*$/, '').replace(/^["']|["']$/g, '').trim();
-      if (!m[1]) block = m[2];
-      conf[m[1] ? `${block}.${m[2]}` : m[2]] = value;
-    }
+    conf = parseProject(readFileSync(join(repo, '.agents/project.yaml'), 'utf8'));
   } catch {
     // no project file: defaults below
   }

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# The gate runner: steps from .agents/project.yaml, one record each (gate/gate.mjs).
+exec node "$(dirname "$(dirname "$(readlink -f "$0")")")/gate/gate.mjs" "$@"
