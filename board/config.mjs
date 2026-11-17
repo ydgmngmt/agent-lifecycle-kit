@@ -4,13 +4,21 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-// The project file's text as { key or block.key: value }, in file order.
+// The project file's text as { key or block.key: value }, in file order. Lines of a `gate_*` block
+// it can't read (a dotted key, a tab) are listed in the non-enumerable `unread`, so the gate refuses
+// them instead of dropping a step.
 export function parseProject(text) {
   const conf = {};
+  const unread = [];
+  Object.defineProperty(conf, 'unread', { value: unread });
   let block = '';
   for (const line of text.split('\n')) {
     const m = line.match(/^( *)([\w-]+):\s*(.*)$/);
-    if (!m) continue;
+    if (!m) {
+      if (/^[^\s#]/.test(line)) block = '';
+      else if (block.startsWith('gate_') && line.trim() && !line.trim().startsWith('#')) unread.push({ block, line });
+      continue;
+    }
     const value = m[3].replace(/\s+#.*$/, '').replace(/\s+—.*$/, '').replace(/^["']|["']$/g, '').trim();
     if (!m[1]) block = m[2];
     conf[m[1] ? `${block}.${m[2]}` : m[2]] = value;

@@ -6,7 +6,8 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { check, prCurrent } from './gate.mjs';
+import { check, parseSteps, prCurrent } from './gate.mjs';
+import { parseProject } from '../board/config.mjs';
 
 const A = 'a'.repeat(40);
 const B = 'b'.repeat(40);
@@ -77,4 +78,87 @@ test('a PR record holds after update-branch merges main, not after a new commit'
   const moved = sh(repo, 'git rev-parse HEAD');
   assert.equal(prCurrent(repo, moved)(recorded), false);
   assert.equal(prCurrent(repo, recorded)(merged), false);
+});
+
+// A repository with this project file committed, and lc-gate to run in it.
+function project(yaml) {
+  const repo = mkdtempSync(join(tmpdir(), 'lc-gate-'));
+  sh(repo, 'git init -q -b main && git config user.name t && git config user.email t@t');
+  mkdirSync(join(repo, '.agents'));
+  writeFileSync(join(repo, '.agents/project.yaml'), yaml.replaceAll('$STATE', `${repo}/state`));
+  sh(repo, 'git add -A && git commit -qm one');
+  const gate = fileURLToPath(new URL('./gate.mjs', import.meta.url));
+  const lc = (env, ...args) => spawnSync('node', [gate, ...args], { cwd: repo, encoding: 'utf8', env: { ...process.env, LC_GATE_STEP: '', ...env } });
+  return { repo, lc, git: (cmd) => sh(repo, cmd) };
+}
+
+test('a PR record does not hold across a merge of a branch that is not on main', () => {
+  const { git } = project('x: 1\n');
+  git('git checkout -q -b pr && git commit -q --allow-empty -m change');
+  const recorded = git('git rev-parse HEAD');
+  git('git checkout -q -b side main && echo unreviewed > u.txt && git add u.txt && git commit -qm side');
+  git('git checkout -q pr && git merge -q --no-ff --no-edit side');
+  assert.equal(prCurrent(git('pwd'), git('git rev-parse HEAD'))(recorded), false);
+});
+
+test("a spawned session's record names the candidate it was briefed on", () => {
+  const { lc, git } = project('handoff_dir: $STATE\ngate_phase:\n  review: session q.md\n');
+  const a = git('git rev-parse HEAD');
+  git('git commit -q --allow-empty -m two');
+  const s = { LC_SESSION: 'gate-x-review', LC_GATE_STEP: 'phase/x/review' };
+  assert.equal(lc({}, 'record', 'phase', 'x', 'review', 'na', '--reason', 'seed', '--candidate', 'HEAD').status, 0);
+  mkdirSync(`${git('pwd')}/state/gates/phase/x/findings`, { recursive: true });
+  writeFileSync(`${git('pwd')}/state/gates/phase/x/findings/review.md`, 'No findings.');
+  assert.match(lc(s, 'record', 'phase', 'x', 'review', 'pass', '--evidence', `${git('pwd')}/state/gates/phase/x/findings/review.md`).stderr, /--candidate/);
+  assert.equal(lc(s, 'record', 'phase', 'x', 'review', 'pass', '--evidence', `${git('pwd')}/state/gates/phase/x/findings/review.md`, '--candidate', a).status, 0);
+  assert.match(lc({}, 'check', 'phase', 'x').stderr, /review: recorded for/);
+});
+
+test('a step line the reader cannot parse is an error, not a dropped step', () => {
+  for (const line of ['  review.security: session q.md', '\treview: session q.md']) {
+    const conf = parseProject(`gate_phase:\n  build: command true\n${line}\n`);
+    assert.throws(() => parseSteps(conf, 'phase'), /cannot read/);
+  }
+});
+
+test('CI checks the steps of base and head, and the record of the phase being closed', () => {
+  const yaml = 'docs:\n  roadmap: road.md\n  phase_records: records/\ngate_phase:\n  build: command true\n  lint: command true\n';
+  const { repo, lc, git } = project(yaml);
+  const base = git('git rev-parse HEAD');
+  const row = (step) => `| ${step} | command | PASS | ${base} | lc-gate | \`true\` exit 0 |  |`;
+  const record = (id, ...steps) => `# Phase record: ${id}\n\n- **Gate:** phase ${id}\n- **Candidate:** ${base}\n\n| Step | Kind | Status | Commit | By | Evidence | Reason |\n| --- | --- | --- | --- | --- | --- | --- |\n${steps.map(row).join('\n')}\n`;
+  mkdirSync(join(repo, 'records'));
+  writeFileSync(join(repo, 'records/one.md'), record('one', 'build'));
+  writeFileSync(join(repo, '.agents/project.yaml'), yaml.replace('  lint: command true\n', ''));
+  writeFileSync(join(repo, 'road.md'), '## One (done) [record](records/one.md)\n');
+  git('git add -A && git commit -qm "one done, lint step dropped"');
+  assert.match(lc({}, 'check', 'phase', '--diff', base, 'HEAD').stderr, /lint: missing/);
+  git(`git checkout -q ${base} -- .agents/project.yaml && git commit -qm "lint back"`);
+  writeFileSync(join(repo, 'records/one.md'), record('one', 'build', 'lint'));
+  writeFileSync(join(repo, 'road.md'), '## Two (closed) [record](records/one.md)\n');
+  git('git add -A && git commit -qm "two closed with one\'s record"');
+  assert.match(lc({}, 'check', 'phase', '--diff', base, 'HEAD').stderr, /is the record of phase one, not two/);
+});
+
+test('a FAIL cannot be carried', () => {
+  const { lc, git } = project('handoff_dir: $STATE\ngate_phase:\n  build: command true\n');
+  writeFileSync(join(git('pwd'), 'log.txt'), 'failed');
+  assert.equal(lc({}, 'record', 'phase', 'x', 'build', 'fail', '--evidence', 'log.txt', '--candidate', 'HEAD').status, 0);
+  git('git commit -q --allow-empty -m fix');
+  const r = lc({}, 'record', 'phase', 'x', 'build', 'pass', '--carry', '--reason', 'r', '--candidate', 'HEAD');
+  assert.match(r.stderr, /only a pass or N\/A is carried/);
+});
+
+test('nobody records the owner step by hand', () => {
+  const { lc, git } = project('handoff_dir: $STATE\ngate_phase:\n  acceptance: owner\n');
+  writeFileSync(join(git('pwd'), 'yes.txt'), 'yes');
+  assert.match(lc({}, 'record', 'phase', 'x', 'acceptance', 'pass', '--evidence', 'yes.txt', '--candidate', 'HEAD').stderr, /only the owner's answer on the board/);
+});
+
+test('a command step does not run on a dirty tree', () => {
+  const { repo, lc } = project('handoff_dir: $STATE\ngate_phase:\n  build: command true\n');
+  writeFileSync(join(repo, '.agents/project.yaml'), `handoff_dir: ${repo}/state\ngate_phase:\n  build: command true\n# dirty\n`);
+  const out = lc({}, 'run', 'phase', 'x', '--base', 'HEAD');
+  assert.match(out.stdout, /uncommitted changes/);
+  assert.match(lc({}, 'check', 'phase', 'x').stderr, /build: missing/);
 });

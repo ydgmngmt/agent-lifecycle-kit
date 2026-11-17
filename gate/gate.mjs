@@ -27,9 +27,10 @@
 // Who may record: a session lc-spawn started for a gate step has LC_GATE_STEP=<gate>/<id>/<step>; it
 // records only that step, only with findings/<step>.md present, and never N/A or a carry. Any other
 // caller is the lead (`by` is LC_SESSION, else "lead").
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, posix, relative, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, parseProject } from '../board/config.mjs';
 
@@ -61,6 +62,8 @@ const git = (repo, ...args) => exec('git', ['-C', repo, ...args]).stdout.trim();
 export function parseSteps(conf, gate) {
   const steps = [];
   const prefix = `gate_${gate}.`;
+  const unread = (conf.unread ?? []).filter((u) => u.block === `gate_${gate}`);
+  if (unread.length) die(`cannot read gate_${gate} line "${unread[0].line.trim()}": a step is \`  <id>: <kind> <argument>\`, two spaces, id of letters, digits, - and _`);
   for (const [key, value] of Object.entries(conf)) {
     if (!key.startsWith(prefix)) continue;
     const id = key.slice(prefix.length);
@@ -95,14 +98,23 @@ export function check(steps, records, sha, current = (s) => s === sha) {
 }
 
 // The PR gate's rule: a record made at `sha` holds for head `head` when sha is the head, or an
-// ancestor of it with only merges between them on the first-parent line (`gh pr update-branch`).
-export function prCurrent(repo, head) {
+// ancestor of it and every commit between them on the first-parent line is a merge of a commit
+// already on main (`gh pr update-branch`). A commit missing locally is an error: fetch first.
+export function prCurrent(repo, head, main = mainRef(repo)) {
   const memo = new Map();
+  const isAncestor = (a, b) => {
+    const s = exec('git', ['-C', repo, 'merge-base', '--is-ancestor', a, b], { ok: true }).status;
+    if (s > 1) die(`${a.slice(0, 12)} or ${b} is not in ${repo}; fetch first`);
+    return s === 0;
+  };
   return (sha) => {
     if (sha === head) return true;
     if (!memo.has(sha)) {
-      const ancestor = exec('git', ['-C', repo, 'merge-base', '--is-ancestor', sha, head], { ok: true }).status === 0;
-      memo.set(sha, ancestor && git(repo, 'rev-list', '--no-merges', '--first-parent', `${sha}..${head}`) === '');
+      const between = isAncestor(sha, head) ? git(repo, 'rev-list', '--first-parent', '--parents', `${sha}..${head}`).split('\n').filter(Boolean) : null;
+      memo.set(sha, Boolean(between) && between.every((l) => {
+        const [, , merged, ...more] = l.split(' ');
+        return merged && !more.length && isAncestor(merged, main);
+      }));
     }
     return memo.get(sha);
   };
@@ -115,8 +127,8 @@ export const gateDir = (cfg, gate, id) => join(gatesRoot(cfg), gate, id);
 const readJson = (file, fallback) => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : fallback);
 const writeJson = (file, value) => {
   mkdirSync(join(file, '..'), { recursive: true });
-  writeFileSync(`${file}.tmp`, JSON.stringify(value, null, 2) + '\n');
-  renameSync(`${file}.tmp`, file);
+  writeFileSync(`${file}.${process.pid}.tmp`, JSON.stringify(value, null, 2) + '\n');
+  renameSync(`${file}.${process.pid}.tmp`, file);
 };
 export function readRecords(dir) {
   const out = {};
@@ -159,8 +171,11 @@ function record(repo, [gate, id, step, status], flags) {
   const s = g.steps.find((x) => x.id === step);
   if (!s) die(`no step ${step} in gate_${gate}; steps: ${g.steps.map((x) => x.id).join(', ')}`);
   if (!STATUS.includes(status)) die(`status must be pass, fail or na, not ${status}`);
-  const sha = candidateOf(g, flags);
+  if (s.kind === 'owner') die(`${step} is an owner step: only the owner's answer on the board records it (lc-gate run)`);
   const own = process.env.LC_GATE_STEP;
+  // A spawned session names the candidate of its brief, so its record never lands on a later one.
+  if (own && !flags.candidate) die('a spawned session records with --candidate <the candidate of its brief>');
+  const sha = candidateOf(g, flags);
   const reason = flags.reason?.trim() || '';
   if (own) {
     if (own !== `${gate}/${id}/${step}`) die(`this session is step ${own}; it may record only that step`);
@@ -173,8 +188,11 @@ function record(repo, [gate, id, step, status], flags) {
   if (flags.carry) {
     if (!old) die(`nothing to carry: ${step} has no record`);
     if (old.sha === sha) die(`${step} is already recorded for the candidate`);
+    if (old.status === 'fail') die(`${step} is FAIL at ${old.sha.slice(0, 12)}: only a pass or N/A is carried; rerun the step`);
+    if (status !== old.status) die(`a carry keeps the status: ${step} is ${label(old)}, not ${status}`);
+    if (evidence) die('a carry keeps the old evidence; drop --evidence');
     if (!reason) die('a carry needs --reason');
-    evidence ||= old.evidence;
+    evidence = old.evidence;
   } else if (status === 'na') {
     if (!reason) die('N/A needs --reason');
   } else {
@@ -238,10 +256,11 @@ function checkGate(repo, [gate, id], flags) {
 
 const verify = (repo, rev) => git(repo, 'rev-parse', '--verify', `${rev}^{commit}`);
 const mainRef = (repo) => (exec('git', ['-C', repo, 'rev-parse', '--verify', '-q', 'origin/HEAD'], { ok: true }).status === 0 ? 'origin/HEAD' : 'main');
+// A glob ending in / is the whole directory.
 const globRe = (glob) =>
-  new RegExp(`^${glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\/?|\*|\?/g, (m) => (m === '?' ? '[^/]' : m === '*' ? '[^/]*' : '.*'))}$`);
+  new RegExp(`^${glob.replace(/\/$/, '/**').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\/?|\*|\?/g, (m) => (m === '?' ? '[^/]' : m === '*' ? '[^/]*' : '.*'))}$`);
 
-function run(repo, [gate, idArg], flags) {
+async function run(repo, [gate, idArg], flags) {
   const id = idArg ?? (gate === 'pr' ? branchId(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')) : undefined);
   const g = load(repo, gate, id);
   const sha = flags.candidate ? verify(repo, flags.candidate) : gate === 'phase' && g.state.candidate ? g.state.candidate : verify(repo, 'HEAD');
@@ -279,7 +298,7 @@ function run(repo, [gate, idArg], flags) {
     else if (waits) say(ctx, s, r ? `${label(r)}; reruns once the steps above have records` : 'waits until every step above has a record');
     else {
       try {
-        r = STEP[s.kind](ctx, s) ?? r;
+        r = (await STEP[s.kind](ctx, s)) ?? r;
       } catch (err) {
         if (!(err instanceof GateError)) throw err;
         say(ctx, s, `not started: ${err.message}`);
@@ -290,6 +309,16 @@ function run(repo, [gate, idArg], flags) {
   const problems = check(g.steps, readRecords(g.dir), sha, current);
   console.log(problems.length ? `${problems.length} step(s) not done; rerun lc-gate run to advance` : `every step holds: lc-gate status ${gate} ${id}${gate === 'phase' ? ' --write' : ' --trailer'}`);
   return 0;
+}
+
+// Whether lc-spawn's tmux session has a window of this name.
+function liveWindow(cfg, name) {
+  try {
+    const r = exec('tmux', ['list-windows', '-t', cfg.tmuxSession || 'agents', '-F', '#W'], { ok: true, timeout: 10_000 });
+    return r.status === 0 && r.stdout.split('\n').includes(name);
+  } catch {
+    return false;
+  }
 }
 
 function say(ctx, s, text) {
@@ -307,18 +336,38 @@ function put(ctx, s, status, evidence, reason, by) {
 
 // What `run` does for a step without a record; returns the record when it wrote one.
 const STEP = {
-  command(ctx, s) {
+  // Runs at the candidate on a clean tree, in its own process group so a timeout kills all of it.
+  async command(ctx, s) {
     const head = git(ctx.repo, 'rev-parse', 'HEAD');
     if (head !== ctx.sha) return say(ctx, s, `check out the candidate ${ctx.sha.slice(0, 12)} to run it (HEAD is ${head.slice(0, 12)})`);
+    if (git(ctx.repo, 'status', '--porcelain', '-uno')) return say(ctx, s, 'not run: the checkout has uncommitted changes, so the result would not be the candidate\'s');
     const evidence = join(ctx.dir, 'evidence');
     mkdirSync(evidence, { recursive: true });
     const log = join(evidence, `${s.id}.log`);
     say(ctx, s, `running: ${s.arg}`);
     const fd = openSync(log, 'w');
     const env = { ...process.env, LC_GATE_CANDIDATE: ctx.sha, LC_GATE_BASE: ctx.base, LC_GATE_EVIDENCE: evidence };
-    const r = spawnSync('bash', ['-c', s.arg], { cwd: ctx.repo, stdio: ['ignore', fd, fd], timeout: COMMAND_TIMEOUT, env });
+    const child = spawn('bash', ['-c', s.arg], { cwd: ctx.repo, stdio: ['ignore', fd, fd], env, detached: true });
+    const killGroup = (signal) => {
+      try {
+        process.kill(-child.pid, signal);
+      } catch {
+        // the group is gone
+      }
+    };
+    let timedOut = false;
+    const r = await new Promise((done) => {
+      const timer = setTimeout(() => {
+        timedOut = true;
+        killGroup('SIGTERM');
+        setTimeout(() => killGroup('SIGKILL'), 10_000).unref();
+      }, COMMAND_TIMEOUT);
+      child.on('error', (error) => (clearTimeout(timer), done({ error })));
+      child.on('exit', (code, signal) => (clearTimeout(timer), done({ code, signal })));
+    });
     closeSync(fd);
-    const why = r.error?.code === 'ETIMEDOUT' ? `timed out after ${COMMAND_TIMEOUT / 1000}s` : r.error ? r.error.message : r.status ? `exit ${r.status}` : r.signal ? `killed by ${r.signal}` : '';
+    if (timedOut) killGroup('SIGKILL');
+    const why = timedOut ? `timed out after ${COMMAND_TIMEOUT / 1000}s` : r.error ? r.error.message : r.code ? `exit ${r.code}` : r.signal ? `killed by ${r.signal}` : '';
     return put(ctx, s, why ? 'fail' : 'pass', log, why ? `${why}; log ${log}` : '', 'lc-gate');
   },
 
@@ -342,7 +391,9 @@ const STEP = {
   session(ctx, s) {
     const name = `gate-${ctx.id}-${s.id}`.replace(/[^\w.-]/g, '-');
     const brief = join(ctx.dir, 'briefs', `${s.id}-${ctx.sha.slice(0, 12)}.md`);
-    if (existsSync(brief)) return say(ctx, s, `session ${name} started; waiting for its record`);
+    // One session per step at a time: a live one (for this candidate or an earlier one) is waited for.
+    if (liveWindow(ctx.cfg, name)) return say(ctx, s, `session ${name} is running; waiting for its record (lc-close ${name} to stop it)`);
+    if (existsSync(brief)) return say(ctx, s, `session ${name} ended without a record; start it again with --rerun ${s.id}`);
     const findings = join(ctx.dir, 'findings', `${s.id}.md`);
     mkdirSync(dirname(findings), { recursive: true });
     mkdirSync(dirname(brief), { recursive: true });
@@ -425,37 +476,60 @@ function writeRecord(g, gate, id, sha) {
   return 0;
 }
 
-// A phase marked done on an added roadmap line: its **Status:** line, or its heading's (…).
-const DONE = /(\*\*Status:\*\*\s*(done|exited|closed)\b|^## .*\((done|exited|closed)\))/i;
+// A roadmap line that marks a phase done: a heading (any level) whose (…) holds done, closed or
+// exited as a word, or a **Status:** line that starts with done, closed, exited or complete(d).
+const DONE_HEADING = /^#{1,6}\s.*\(([^)]*\b(done|closed|exited)\b[^)]*)\)/i;
+const DONE_STATUS = /\*\*Status:\*\*\s*(done|exited|closed|complete|completed)\b/i;
+// A phase's id is its roadmap heading's name, slugged as the board does: `## Core journeys (…)` is
+// core-journeys. `lc-gate run phase <id>` uses that id, and the record's **Gate:** line names it.
+export const phaseId = (heading) =>
+  heading.replace(/^#{1,6}\s+/, '').replace(/\s*\(.*$/, '').replace(/\[[^\]]*\]\([^)]*\)/g, '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-// The CI form: every roadmap line the diff adds that marks a phase done links a phase record, and
-// every phase record linked or changed holds for its candidate against the steps declared at head.
+// The CI form: every roadmap line the diff adds that marks a phase done links that phase's record,
+// and every phase record linked or changed holds for its candidate against every step declared at
+// the base or at the head (a step deleted in the same diff is still required).
 function checkPhaseDiff(repo, baseRev, headRev) {
   if (!baseRev || !headRev) die('usage: lc-gate check phase --diff <base> <head>');
   const [base, head] = [verify(repo, baseRev), verify(repo, headRev)];
-  const show = (path) => {
-    const r = exec('git', ['-C', repo, 'show', `${head}:${path}`], { ok: true });
+  const showAt = (rev, path) => {
+    const r = exec('git', ['-C', repo, 'show', `${rev}:${path}`], { ok: true });
     return r.status === 0 ? r.stdout : null;
   };
+  const show = (path) => showAt(head, path);
   const conf = parseProject(show('.agents/project.yaml') ?? die('no .agents/project.yaml at the head'));
   const steps = parseSteps(conf, 'phase');
+  const atBase = showAt(base, '.agents/project.yaml');
+  for (const s of atBase ? parseSteps(parseProject(atBase), 'phase') : []) if (!steps.some((x) => x.id === s.id)) steps.push(s);
   const roadmap = conf['docs.roadmap'];
   const recDir = conf['docs.phase_records']?.replace(/\/$/, '');
   if (!roadmap || !recDir) die('the project file at the head needs docs.roadmap and docs.phase_records');
-  const records = new Set();
+  const records = new Map(); // path -> the phase ids whose done line links it
   const problems = [];
+  const roadLines = (show(roadmap) ?? '').split('\n');
   const added = git(repo, 'diff', '-U0', base, head, '--', roadmap).split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++'));
   for (const line of added.map((l) => l.slice(1))) {
-    if (!DONE.test(line)) continue;
+    const heading = DONE_HEADING.test(line);
+    if (!heading && !DONE_STATUS.test(line)) continue;
+    const at = roadLines.indexOf(line);
+    const owner = heading ? line : roadLines.slice(0, at < 0 ? 0 : at).reverse().find((l) => /^#{1,6}\s/.test(l)) ?? '';
     const links = [...line.matchAll(/\]\(([^)\s#]+\.md)/g)].map((m) => m[1]).filter((t) => t.includes(`${basename(recDir)}/`));
     if (!links.length) problems.push(`${roadmap}: a phase is marked done without a link to its record: ${line.trim().slice(0, 120)}`);
-    for (const t of links) records.add(posix.join(recDir, basename(t)));
+    for (const t of links) {
+      const path = posix.join(recDir, basename(t));
+      if (!records.has(path)) records.set(path, new Set());
+      records.get(path).add(phaseId(owner));
+    }
   }
   for (const path of git(repo, 'diff', '--name-only', '--no-renames', '--diff-filter=AM', base, head, '--', recDir).split('\n')) {
-    if (path.endsWith('.md') && posix.dirname(path) === recDir && show(path)?.includes('**Gate:** phase')) records.add(path);
+    if (path.endsWith('.md') && posix.dirname(path) === recDir && show(path)?.includes('**Gate:** phase') && !records.has(path)) records.set(path, new Set());
   }
-  if (records.size && !steps.length) problems.push('the project file at the head declares no gate_phase steps');
-  for (const path of [...records].sort()) problems.push(...checkRecord(repo, head, path, show(path), steps));
+  if (records.size && !steps.length) problems.push('the project file declares no gate_phase steps');
+  for (const [path, phases] of [...records].sort()) {
+    const text = show(path);
+    const gateId = text?.match(/^\s*-?\s*\*\*Gate:\*\*\s*phase\s+(\S+)/m)?.[1];
+    for (const p of phases) if (text !== null && gateId !== p) problems.push(`${path}: is the record of phase ${gateId ?? '(no **Gate:** line)'}, not ${p || '(a phase with no heading)'}`);
+    problems.push(...checkRecord(repo, head, path, text, steps));
+  }
   for (const p of problems) console.error(p);
   console.log(`phase exit check: ${records.size} record(s), ${problems.length} problem(s)`);
   return problems.length ? 1 : 0;
@@ -492,7 +566,8 @@ function checkRun(path, s, url, candidate) {
   if (out.status) return [`${path}: ${s.id}: run ${id} can't be read: ${out.stderr.trim()}`];
   const run = JSON.parse(out.stdout);
   const problems = [];
-  if (!String(run.path ?? '').split('@')[0].endsWith(s.arg)) problems.push(`${path}: ${s.id}: run ${id} is ${run.path}, not ${s.arg}`);
+  const runPath = String(run.path ?? '').split('@')[0];
+  if (runPath !== s.arg && runPath !== `.github/workflows/${s.arg}`) problems.push(`${path}: ${s.id}: run ${id} is ${run.path}, not ${s.arg}`);
   if (run.conclusion !== 'success') problems.push(`${path}: ${s.id}: run ${id} concluded ${run.conclusion}, not success`);
   if (!String(run.display_title ?? '').includes(candidate)) problems.push(`${path}: ${s.id}: run ${id}'s title "${run.display_title}" doesn't name the candidate`);
   return problems;
@@ -533,61 +608,147 @@ export function gateRows(repo) {
 
 // --- the hook ----------------------------------------------------------------------------------
 
-// PreToolUse on Bash (hooks/hooks.json filters to the gate start and the merge). Reads the hook's
-// JSON on stdin. Does nothing without gate_pr or with gate_pr_mode off; observe (the default) logs
-// to <gates>/observe.log and tells the session what enforce would refuse; enforce exits 2 with the
-// missing steps. Its own errors are logged and let the command through.
-function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
-  let log = null;
-  const note = (entry) => log && appendFileSync(log, JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\n');
-  try {
-    const input = JSON.parse(stdin);
-    const command = String(input.tool_input?.command ?? '');
-    const point = /\bno-mistakes\s+axi\s+run\b/.test(command) ? 'gate start' : /\bgh\s+pr\s+merge\b/.test(command) ? 'merge' : null;
-    if (!point) return 0;
-    // `cd <dir> && …` runs the gate or the merge from <dir>.
-    const cd = command.match(/(?:^|&&|;)\s*cd\s+("[^"]+"|'[^']+'|\S+)\s*&&/)?.[1]?.replace(/^["']|["']$/g, '');
-    const cwd = resolve(input.cwd || process.cwd(), cd ?? '.');
-    const repo = exec('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { ok: true }).stdout.trim();
-    if (!repo || !existsSync(join(repo, '.agents/project.yaml'))) return 0;
-    const cfg = loadConfig(repo);
-    const mode = cfg.conf.gate_pr_mode || 'observe';
-    const steps = parseSteps(cfg.conf, 'pr');
-    if (!steps.length || mode === 'off') return 0;
-    mkdirSync(gatesRoot(cfg), { recursive: true });
-    log = join(gatesRoot(cfg), 'observe.log');
-    let branch;
-    let head;
-    if (point === 'merge') {
-      const pr = command.match(/\bgh\s+pr\s+merge\b[^;&|\n]*?(?:\/pull\/|\s#?)(\d+)(?=\s|$|[;&|])/)?.[1];
-      const view = JSON.parse(exec('gh', ['pr', 'view', ...(pr ? [pr] : []), '--json', 'headRefName,headRefOid'], { cwd: repo, timeout: GH_TIMEOUT }).stdout);
-      [branch, head] = [view.headRefName, view.headRefOid];
-    } else {
-      [branch, head] = [git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD'), git(cwd, 'rev-parse', 'HEAD')];
-    }
-    const id = branchId(branch);
-    const missing = check(steps, readRecords(gateDir(cfg, 'pr', id)), head, prCurrent(repo, head));
-    if (!missing.length) return 0;
-    const session = process.env.LC_SESSION || input.session_id || '';
-    const what = `the PR gate for ${branch} at ${head.slice(0, 12)} does not hold:\n  ${missing.join('\n  ')}\nRun lc-gate run pr ${id}, then record each step.`;
-    if (mode === 'enforce') {
-      note({ mode, point, branch, head, missing, session, refused: true });
-      process.stderr.write(`lc-gate: ${what}\n`);
-      return 2;
-    }
-    note({ mode, point, branch, head, missing, session });
-    const context = `lc-gate (observe mode): this ${point} went ahead, but enforce mode would have refused it: ${what}`;
-    console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: context } }));
-    return 0;
-  } catch (err) {
-    try {
-      note({ error: err.message });
-    } catch {
-      // nowhere to log
-    }
-    process.stderr.write(`lc-gate hook: ${err.message} (the command goes ahead)\n`);
-    return 0;
+// The simple commands of a shell line, split at ;, &, |, ( ) and newlines, as words { text, dynamic };
+// `dynamic` marks a word the shell would expand ($, `), so its value is unknown here.
+export function shellCommands(line) {
+  const cmds = [[]];
+  let word = null;
+  let quote = null;
+  const add = (ch, dynamic = false) => {
+    word ??= { text: '', dynamic: false };
+    word.text += ch;
+    word.dynamic ||= dynamic;
+  };
+  const end = () => {
+    if (word) cmds.at(-1).push(word);
+    word = null;
+  };
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      else add(c);
+    } else if (quote === '"') {
+      if (c === '"') quote = null;
+      else if (c === '\\' && i + 1 < line.length) add(line[++i]);
+      else add(c, c === '$' || c === '`');
+    } else if (c === "'" || c === '"') {
+      quote = c;
+      word ??= { text: '', dynamic: false };
+    } else if (c === '\\' && i + 1 < line.length) add(line[++i]);
+    else if (c === ' ' || c === '\t') end();
+    else if (/[;&|()\n]/.test(c)) {
+      end();
+      if (cmds.at(-1).length) cmds.push([]);
+    } else add(c, c === '$' || c === '`');
   }
+  end();
+  return cmds.filter((c) => c.length);
+}
+
+// `gh [-R repo] pr merge [flags] [target]` as { target, repo }, where target is the first word that
+// is not a flag or a flag's value (none: the current branch's PR, as gh does); else null.
+const GH_VALUE_FLAGS = new Set(['-t', '--subject', '-b', '--body', '-F', '--body-file', '-A', '--author-email', '--match-head-commit']);
+export function ghMerge(words) {
+  if (words[0]?.text !== 'gh') return null;
+  const repo = [];
+  let target = null;
+  let i = 1;
+  const flag = () => {
+    const t = words[i].text;
+    if (t === '-R' || t === '--repo') repo.push(t, words[++i]?.text ?? '');
+    else if (t.startsWith('--repo=')) repo.push(t);
+    else return false;
+    return true;
+  };
+  for (; i < words.length && words[i].text.startsWith('-'); i++) flag();
+  if (words[i]?.text !== 'pr' || words[i + 1]?.text !== 'merge') return null;
+  for (i += 2; i < words.length; i++) {
+    const t = words[i].text;
+    if (t === '--') {
+      target ??= words[i + 1] ?? null;
+      break;
+    }
+    if (/^\d*[<>]/.test(t)) {
+      if (/^\d*[<>]+&?$/.test(t)) i++; // a redirection and its file
+    } else if (t.startsWith('-')) {
+      if (!flag() && GH_VALUE_FLAGS.has(t)) i++;
+    } else target ??= words[i];
+  }
+  return { target, repo };
+}
+
+// PreToolUse on Bash (hooks/hooks.json filters to the gate start and the merge). Reads the hook's
+// JSON on stdin and checks every gate start and every `gh pr merge` in the command line, each from
+// the directory a `cd` before it left. Per repository: nothing without gate_pr or with gate_pr_mode
+// off; observe (the default) logs to <gates>/observe.log and tells the session what enforce would
+// refuse; enforce exits 2 with the missing steps. Its own errors, a config error or a PR it can't
+// identify are logged and told to the session, and let the command through.
+function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
+  const told = [];
+  const refused = [];
+  let input;
+  try {
+    input = JSON.parse(stdin);
+  } catch (err) {
+    told.push(`lc-gate hook: unreadable hook input (${err.message}); nothing was checked`);
+  }
+  const session = process.env.LC_SESSION || input?.session_id || '';
+  let cwd = resolve(input?.cwd || process.cwd());
+  const points = [];
+  for (const cmd of shellCommands(String(input?.tool_input?.command ?? ''))) {
+    const w = cmd.slice(cmd.findIndex((x) => !/^[A-Za-z_]\w*=/.test(x.text)));
+    if (w[0]?.text === 'cd' && w[1] && !w[1].dynamic) cwd = resolve(cwd, w[1].text.replace(/^~(?=\/|$)/, homedir()));
+    else if (w[0]?.text === 'no-mistakes' && w[1]?.text === 'axi' && w[2]?.text === 'run') points.push({ point: 'gate start', cwd });
+    else if (ghMerge(w)) points.push({ point: 'merge', cwd, ...ghMerge(w) });
+  }
+  for (const p of points) {
+    let log = null;
+    const note = (entry) => log && appendFileSync(log, JSON.stringify({ at: new Date().toISOString(), point: p.point, session, ...entry }) + '\n');
+    try {
+      const repo = exec('git', ['-C', p.cwd, 'rev-parse', '--show-toplevel'], { ok: true }).stdout.trim();
+      if (!repo || !existsSync(join(repo, '.agents/project.yaml'))) continue;
+      const cfg = loadConfig(repo);
+      mkdirSync(gatesRoot(cfg), { recursive: true });
+      log = join(gatesRoot(cfg), 'observe.log');
+      const mode = cfg.conf.gate_pr_mode || 'observe';
+      if (mode === 'off') continue;
+      if (mode !== 'observe' && mode !== 'enforce') die(`gate_pr_mode is "${mode}"; it must be off, observe or enforce`);
+      const steps = parseSteps(cfg.conf, 'pr');
+      if (!steps.length) continue;
+      let branch;
+      let head;
+      if (p.point === 'merge') {
+        if (p.target?.dynamic) die(`can't tell which PR \`gh pr merge ${p.target.text}\` merges: the shell expands it`);
+        const view = exec('gh', ['pr', 'view', ...(p.target ? [p.target.text] : []), ...p.repo, '--json', 'headRefName,headRefOid'], { cwd: p.cwd, timeout: GH_TIMEOUT });
+        ({ headRefName: branch, headRefOid: head } = JSON.parse(view.stdout));
+        // The PR's head and main as the remote has them (an update-branch happens on the remote).
+        if (exec('git', ['-C', repo, 'remote', 'get-url', 'origin'], { ok: true }).status === 0) exec('git', ['-C', repo, 'fetch', '-q', 'origin'], { timeout: GH_TIMEOUT });
+      } else {
+        [branch, head] = [git(p.cwd, 'rev-parse', '--abbrev-ref', 'HEAD'), git(p.cwd, 'rev-parse', 'HEAD')];
+      }
+      const id = branchId(branch);
+      const missing = check(steps, readRecords(gateDir(cfg, 'pr', id)), head, prCurrent(repo, head));
+      if (!missing.length) continue;
+      const what = `the PR gate for ${branch} at ${head.slice(0, 12)} does not hold:\n  ${missing.join('\n  ')}\nRun lc-gate run pr ${id}, then record each step.`;
+      note({ mode, branch, head, missing, ...(mode === 'enforce' ? { refused: true } : {}) });
+      if (mode === 'enforce') refused.push(what);
+      else told.push(`lc-gate (observe mode): this ${p.point} went ahead, but enforce mode would have refused it: ${what}`);
+    } catch (err) {
+      try {
+        note({ error: err.message });
+      } catch {
+        // nowhere to log
+      }
+      told.push(`lc-gate hook could not check this ${p.point}, so it goes ahead unchecked: ${err.message}`);
+    }
+  }
+  if (refused.length) {
+    process.stderr.write(`lc-gate: ${[...refused, ...told].join('\n')}\n`);
+    return 2;
+  }
+  if (told.length) console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: told.join('\n') } }));
+  return 0;
 }
 
 // --- main --------------------------------------------------------------------------------------
@@ -606,18 +767,18 @@ function parseArgs(argv) {
   return { pos, flags };
 }
 
-export function main(argv, cwd = process.cwd()) {
+export async function main(argv, cwd = process.cwd()) {
   const [cmd, ...rest] = argv;
   const repo = exec('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { ok: true }).stdout.trim() || cwd;
   const { pos, flags } = parseArgs(rest);
   const commands = { run, record, status, hook, check: (r, p, f) => (f.diff ? checkPhaseDiff(r, f.diff, p[1]) : checkGate(r, p, f)) };
   if (!commands[cmd]) die(`usage: lc-gate run|record|status|check …; see the top of gate/gate.mjs`);
-  return commands[cmd](repo, pos, flags) ?? 0;
+  return (await commands[cmd](repo, pos, flags)) ?? 0;
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    process.exitCode = main(process.argv.slice(2));
+    process.exitCode = await main(process.argv.slice(2));
   } catch (err) {
     if (!(err instanceof GateError)) throw err;
     console.error(`lc-gate: ${err.message}`);
