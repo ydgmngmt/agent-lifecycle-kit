@@ -355,3 +355,11 @@ test('the pre-commit template runs plan-check on the staged files', () => {
   assert.equal(bare.status, 0, bare.stderr);
   assert.match(bare.stderr, /lc-gate is not on PATH/);
 });
+
+test('an after-gate command step can be planned: the author plans first, the pipeline gives the final record', () => {
+  const conf = parseProject('paths:\n  mech: src/**\ngate_pr:\n  fit: command check-review if mech plan after-gate\n  tf: command terraform plan\n');
+  const [fit, tf] = parseSteps(conf, 'pr');
+  assert.deepEqual(fit, { id: 'fit', kind: 'command', arg: 'check-review', if: 'mech', plan: true, afterGate: true });
+  // Without after-gate, a command's trailing "plan" stays part of the command, as it always was.
+  assert.deepEqual(tf, { id: 'tf', kind: 'command', arg: 'terraform plan', if: null });
+});

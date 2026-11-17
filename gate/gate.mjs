@@ -89,12 +89,13 @@ export function parseSteps(conf, gate) {
     if (!key.startsWith(prefix)) continue;
     const id = key.slice(prefix.length);
     // A trailing `after-gate` marks a step that only the review pipeline's result can satisfy: the gate
-    // start skips it, the merge requires it. A `plan` before it marks a here or session step as planned;
-    // on another kind it stays part of the argument, as it always was.
+    // start skips it, the merge requires it. A `plan` before it marks a here or session step as planned,
+    // and an after-gate command step too (the author plans first, the pipeline's result is the final
+    // record); on any other step it stays part of the argument, as it always was.
     const afterGate = /\safter-gate$/.test(value);
     let rest = afterGate ? value.replace(/\s+after-gate$/, '') : value;
     const kind = rest.match(/^\S+/)?.[0];
-    const plan = PLANNED_KINDS.includes(kind) && /\splan$/.test(rest);
+    const plan = (PLANNED_KINDS.includes(kind) || (kind === 'command' && afterGate)) && /\splan$/.test(rest);
     if (plan) rest = rest.replace(/\s+plan$/, '');
     const m = rest.match(/^(\S+)\s*(.*?)(?:\s+if\s+([\w-]+))?$/);
     if (!m || !KINDS.includes(m[1])) die(`${prefix}${id}: "${value}" is not "<kind> <argument> [if <paths key>] [plan] [after-gate]" with kind ${KINDS.join(', ')}`);
