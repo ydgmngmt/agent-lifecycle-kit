@@ -13,6 +13,7 @@
 // What stays in <data dir>/state.json, because no file holds it: a headline, per-phase notes,
 // journey and criterion status not yet shown by a phase run, extra items, and a note per session.
 // Questions for the owner: <data dir>/questions.json; answers are appended to answers.jsonl.
+// Gates: one panel per gate run most recently, a row per step of gate_<gate> with its record (lc-gate).
 // Sessions lc-spawn started: <data dir>/spawned.tsv. A session's note defaults to its brief's title, and
 // its branch finds its PR; a window lc-spawn did not start shows them from its prompt and pane path.
 // GET /api/stale lists what is probably out of date (staleList); board/cli.mjs changes state.json.
@@ -22,6 +23,7 @@ import { readFile, appendFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.mjs';
+import { gateRows } from '../gate/gate.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(process.argv[2] ?? process.cwd());
@@ -316,6 +318,16 @@ const answers = async () =>
     }
   });
 
+// The step rows of the gates run most recently (gate/gate.mjs); a broken gate file never breaks the page.
+const gates = () => {
+  try {
+    return gateRows(repo);
+  } catch (err) {
+    console.error(err);
+    return [];
+  }
+};
+
 const send = (res, status, type, body) => {
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
   res.end(body);
@@ -358,6 +370,7 @@ async function snapshot() {
     prs,
     spawned: [...spawns.keys()],
     sessions: live.map(({ title, ...x }) => ({ ...x, note: state.sessions?.[x.name] || title })),
+    gates: gates(),
     questions: questions.map((q) => ({ ...q, answer: answered.get(q.id) ?? null, outcome: state.outcomes?.[q.id] ?? null })),
     at: new Date().toISOString(),
   };
