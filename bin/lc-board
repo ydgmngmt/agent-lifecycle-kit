@@ -35,7 +35,7 @@ case "$cmd" in
     if running; then echo "running (pid $(cat "$pidfile")) on http://localhost:$port, data $data"; else echo "not running; data $data"; exit 1; fi ;;
   keeper)
     brief=$data/keeper-brief.md
-    printf '# Board keeper for %s\n\nInvoke the `board-keeper` skill and follow it. Repository: %s. Wait for the word `tick`.\n' "$(basename "$root")" "$root" >"$brief"
+    printf '# Board keeper for %s\n\nInvoke the `board` skill and follow its section Board keeper. Repository: %s. Wait for the word `tick`.\n' "$(basename "$root")" "$root" >"$brief"
     # A small context: no MCP servers, no user or project settings, only this kit's skills.
     # Measured on one repository: 44k tokens of fixed context per call by default, 26k this way.
     # Without user settings, Claude Code asks again to accept bypass mode; --settings answers that.
