@@ -1,0 +1,12 @@
+#!/bin/sh
+# ADLC: no commit of code without the plan, where a gate_pr step ends in `plan` (lc-gate plan-check).
+# Install: copy this file to .githooks/pre-commit in the repository, then
+#   git config core.hooksPath .githooks
+if ! command -v lc-gate >/dev/null 2>&1; then
+  echo "lc-gate is not on PATH: the plan check is skipped (install the agent-lifecycle-kit, ./install.sh)" >&2
+  exit 0
+fi
+if command -v timeout >/dev/null 2>&1; then
+  exec timeout 30 lc-gate plan-check --staged
+fi
+exec lc-gate plan-check --staged

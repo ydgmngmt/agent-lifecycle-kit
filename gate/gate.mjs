@@ -11,7 +11,11 @@
 //                       a table; --write generates the phase record, --trailer prints Verified-By
 //   lc-gate check <gate> <id> [--candidate <sha>]      exits 1 listing missing, stale or failed steps
 //   lc-gate check phase --diff <base> <head>           the CI form, on the roadmap and phase records
-//   lc-gate hook        the PreToolUse hook (hooks/hooks.json): the PR gate at its start and at merge
+//   lc-gate plan-check [--staged] [--files <path>…]
+//                       exit 1 when a planned gate_pr step applies to these files on this branch and has
+//                       no plan record (gate_pr_plan: enforce); the git pre-commit hook and the edit hook
+//   lc-gate hook        the PreToolUse hook (hooks/hooks.json): the PR gate at its start and at merge;
+//                       the plan on every Edit/Write and git commit, and no --no-verify while it applies
 //
 // Step kinds: command (runs in the repo at the candidate, records its exit), workflow (dispatches
 // the GitHub workflow with -f candidate=<sha>, records the run whose title holds the candidate),
@@ -319,6 +323,11 @@ const mainRef = (repo) => (exec('git', ['-C', repo, 'rev-parse', '--verify', '-q
 // A glob ending in / is the whole directory.
 const globRe = (glob) =>
   new RegExp(`^${glob.replace(/\/$/, '/**').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\/?|\*|\?/g, (m) => (m === '?' ? '[^/]' : m === '*' ? '[^/]*' : '.*'))}$`);
+// Whether any of `files` (repo-relative) is under a glob of paths.<key>.
+const matchesPaths = (conf, key, files) => {
+  const globs = conf[`paths.${key}`].split(/[\s,]+/).filter(Boolean).map(globRe);
+  return files.some((f) => globs.some((re) => re.test(f)));
+};
 
 async function run(repo, [gate, idArg], flags) {
   const id = idArg ?? (gate === 'pr' ? branchId(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')) : undefined);
@@ -335,8 +344,7 @@ async function run(repo, [gate, idArg], flags) {
   let diff;
   const touches = (key) => {
     diff ??= git(repo, 'diff', '--name-only', base, sha).split('\n').filter(Boolean);
-    const globs = g.cfg.conf[`paths.${key}`].split(/[\s,]+/).filter(Boolean).map(globRe);
-    return diff.some((f) => globs.some((re) => re.test(f)));
+    return matchesPaths(g.cfg.conf, key, diff);
   };
   ctx.width = Math.max(...g.steps.map((s) => s.id.length));
   console.log(`${gate} ${id}: candidate ${sha.slice(0, 12)}, base ${base.slice(0, 12)}`);
@@ -683,6 +691,131 @@ export function gateRows(repo) {
   return out.sort((a, b) => b.at - a.at).slice(0, 4);
 }
 
+// --- the plan, before the work -----------------------------------------------------------------
+
+const PLAN_MODES = ['off', 'observe', 'enforce'];
+const FAST = 10_000; // the plan check runs on every edit: a git call that takes longer has hung
+const fastGit = (repo, ...args) => exec('git', ['-C', repo, ...args], { timeout: FAST, ok: true });
+
+// The default branch: origin/HEAD's name, else main or master.
+function isMainBranch(repo, branch) {
+  const origin = fastGit(repo, 'symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD').stdout.trim();
+  return origin ? branch === origin.replace(/^origin\//, '') : branch === 'main' || branch === 'master';
+}
+
+// The files a commit would take: staged, or, with `pending`, every changed or untracked file too
+// (a `git add` in the same command line has not run yet when the hook sees it).
+function changedFiles(repo, pending) {
+  if (!pending) return fastGit(repo, 'diff', '--cached', '--name-only', '--no-renames', '-z').stdout.split('\0').filter(Boolean);
+  const out = [];
+  const entries = fastGit(repo, 'status', '--porcelain=v1', '-z', '--untracked-files=all').stdout.split('\0');
+  for (let i = 0; i < entries.length; i++) {
+    if (!entries[i]) continue;
+    out.push(entries[i].slice(3));
+    if (/^[RC]/.test(entries[i])) i++; // a rename's old path follows
+  }
+  return out;
+}
+
+// A path as the repository sees it: through symlinks, from its nearest existing ancestor.
+function repoPath(repo, file) {
+  let dir = resolve(file);
+  const rest = [];
+  while (!existsSync(dir) && dirname(dir) !== dir) {
+    rest.unshift(basename(dir));
+    dir = dirname(dir);
+  }
+  return relative(repo, join(realpathSync(dir), ...rest)).split('\\').join('/');
+}
+
+// Whether the work on this branch may go ahead without a plan. Nothing applies (null) without a
+// project file, with gate_pr_plan off, without a planned step in gate_pr, on the default branch or a
+// detached HEAD, or when no file is under the step's `if` paths (a step without `if` takes any file).
+// Files under .agents/ never count: the plan itself can be written there. Otherwise { mode, branch,
+// applies: the planned steps the files fall under, missing: those without a valid plan record, message }.
+export function planState(repo, { files = [], staged = false, pending = false } = {}) {
+  if (!existsSync(join(repo, '.agents/project.yaml'))) return null;
+  const cfg = loadConfig(repo);
+  const mode = cfg.conf.gate_pr_plan || 'observe';
+  if (!PLAN_MODES.includes(mode)) die(`gate_pr_plan is "${mode}"; it must be ${PLAN_MODES.join(', ')}`);
+  if (mode === 'off') return null;
+  const planned = parseSteps(cfg.conf, 'pr').filter((s) => s.plan);
+  if (!planned.length) return null;
+  const branch = fastGit(repo, 'symbolic-ref', '-q', '--short', 'HEAD').stdout.trim();
+  if (!branch || isMainBranch(repo, branch)) return null;
+  const rel = (staged || pending ? changedFiles(repo, pending) : files.map((f) => repoPath(repo, f)))
+    .filter((f) => f && !f.startsWith('../') && f !== '..' && !f.startsWith('.agents/'));
+  const applies = rel.length ? planned.filter((s) => !s.if || matchesPaths(cfg.conf, s.if, rel)) : [];
+  if (!applies.length) return null;
+  const id = branchId(branch);
+  const records = readRecords(gateDir(cfg, 'pr', id));
+  const missing = applies.filter((s) => planProblems(s, records[`${s.id}.plan`]).length);
+  const st = { cfg, mode, branch, applies, missing, files: rel, message: '' };
+  if (!missing.length) return st;
+  let commits = 0;
+  try {
+    commits = Number(git(repo, 'rev-list', '--count', `${git(repo, 'merge-base', mainRef(repo), 'HEAD')}..HEAD`));
+  } catch {
+    // no main to count from: say the before-the-work form
+  }
+  st.message = missing.map((s) => {
+    const file = rel.find((f) => !s.if || matchesPaths(cfg.conf, s.if, [f]));
+    const record = commits
+      ? `the branch already has ${commits} commit(s), so only the lead can record it now: lc-gate record pr ${id} ${s.id} plan na --reason …`
+      : `then: lc-gate record pr ${id} ${s.id} plan --evidence <file>`;
+    return `no plan for step ${s.id} on ${branch}, and ${file} is ${s.if ? `under paths.${s.if}` : 'in the repository'}. The plan comes before the code: following ${s.arg} and the project's chosen tools (the pr-gate skill), write one line per piece of work, "I will call <function> (<docs page>) for <what>", in a file outside the repository or under .agents/; ${record}`;
+  }).join('\n');
+  return st;
+}
+
+// `lc-gate plan-check [--staged] [--files <path>…]`: exit 1 with what is missing when enforce
+// would refuse; in observe mode the same is logged and told, and the exit is 0.
+function planCheck(repo, pos, flags, cwd = process.cwd()) {
+  const st = planState(repo, { files: pos.map((f) => resolve(cwd, f)), staged: Boolean(flags.staged) });
+  if (!st?.missing.length) return 0;
+  const log = join(gatesRoot(st.cfg), 'observe.log');
+  mkdirSync(dirname(log), { recursive: true });
+  appendFileSync(log, JSON.stringify({ at: new Date().toISOString(), point: 'plan', session: process.env.LC_SESSION || '', mode: st.mode, branch: st.branch, missing: st.missing.map((s) => s.id), files: st.files.slice(0, 20), ...(st.mode === 'enforce' ? { refused: true } : {}) }) + '\n');
+  if (st.mode === 'enforce') {
+    console.error(`lc-gate: ${st.message}`);
+    return 1;
+  }
+  console.error(`lc-gate (observe mode): this goes ahead, but gate_pr_plan: enforce would refuse it: ${st.message}`);
+  return 0;
+}
+
+// `git [global options] commit …` as { cwd, noVerify }, else null.
+const GIT_VALUE_OPTS = new Set(['-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env']);
+const COMMIT_VALUE_SHORT = 'mFCctSu'; // short options whose value follows, attached or as the next word
+const COMMIT_VALUE_LONG = new Set(['--message', '--file', '--author', '--date', '--reuse-message', '--reedit-message', '--fixup', '--squash', '--template', '--cleanup', '--trailer']);
+export function gitCommit(words, cwd) {
+  if (!/(^|\/)git$/.test(words[0]?.text ?? '')) return null;
+  let i = 1;
+  for (; i < words.length && words[i].text.startsWith('-'); i++) {
+    const t = words[i].text;
+    if (t === '-C') cwd = resolve(cwd, (words[++i]?.text ?? '').replace(/^~(?=\/|$)/, homedir()));
+    else if (GIT_VALUE_OPTS.has(t)) i++;
+  }
+  if (words[i]?.text !== 'commit') return null;
+  let noVerify = false;
+  for (i++; i < words.length; i++) {
+    const t = words[i].text;
+    if (t === '--') break;
+    if (t === '--no-verify') noVerify = true;
+    else if (COMMIT_VALUE_LONG.has(t)) i++;
+    else if (/^-[^-]/.test(t)) {
+      for (let k = 1; k < t.length; k++) {
+        if (t[k] === 'n') noVerify = true;
+        if (COMMIT_VALUE_SHORT.includes(t[k])) {
+          if (k === t.length - 1 && 'mFCct'.includes(t[k])) i++;
+          break;
+        }
+      }
+    }
+  }
+  return { cwd, noVerify };
+}
+
 // --- the hook ----------------------------------------------------------------------------------
 
 // The simple commands of a shell line, split at ;, &, |, ( ) and newlines, as words { text, dynamic };
@@ -761,6 +894,7 @@ export function ghMerge(words) {
 // off; observe (the default) logs to <gates>/observe.log and tells the session what enforce would
 // refuse; enforce exits 2 with the missing steps. Its own errors, a config error or a PR it can't
 // identify are logged and told to the session, and let the command through.
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
   const told = [];
   const refused = [];
@@ -773,11 +907,47 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
   const session = process.env.LC_SESSION || input?.session_id || '';
   let cwd = resolve(input?.cwd || process.cwd());
   const points = [];
-  for (const cmd of shellCommands(String(input?.tool_input?.command ?? ''))) {
-    const w = cmd.slice(cmd.findIndex((x) => !/^[A-Za-z_]\w*=/.test(x.text)));
-    if (w[0]?.text === 'cd' && w[1] && !w[1].dynamic) cwd = resolve(cwd, w[1].text.replace(/^~(?=\/|$)/, homedir()));
-    else if (w[0]?.text === 'no-mistakes' && w[1]?.text === 'axi' && w[2]?.text === 'run') points.push({ point: 'gate start', cwd });
-    else if (ghMerge(w)) points.push({ point: 'merge', cwd, ...ghMerge(w) });
+  const plans = []; // edits and commits, checked against gate_pr_plan
+  if (EDIT_TOOLS.has(input?.tool_name)) {
+    const file = input.tool_input?.file_path ?? input.tool_input?.notebook_path;
+    if (file) plans.push({ point: 'edit', file: resolve(cwd, String(file)) });
+  } else {
+    for (const cmd of shellCommands(String(input?.tool_input?.command ?? ''))) {
+      const w = cmd.slice(cmd.findIndex((x) => !/^[A-Za-z_]\w*=/.test(x.text)));
+      if (w[0]?.text === 'cd' && w[1] && !w[1].dynamic) cwd = resolve(cwd, w[1].text.replace(/^~(?=\/|$)/, homedir()));
+      else if (w[0]?.text === 'no-mistakes' && w[1]?.text === 'axi' && w[2]?.text === 'run') points.push({ point: 'gate start', cwd });
+      else if (ghMerge(w)) points.push({ point: 'merge', cwd, ...ghMerge(w) });
+      else if (gitCommit(w, cwd)) plans.push({ point: 'commit', ...gitCommit(w, cwd) });
+    }
+  }
+  // The plan before the work (gate_pr_plan): an edit is checked on its file, a commit on every
+  // changed file, and a commit's --no-verify is refused while a planned step applies to it.
+  for (const p of plans) {
+    let log = null;
+    const note = (entry) => log && appendFileSync(log, JSON.stringify({ at: new Date().toISOString(), point: 'plan', on: p.point, session, ...entry }) + '\n');
+    try {
+      let dir = p.file ? dirname(p.file) : p.cwd;
+      while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
+      const repo = fastGit(dir, 'rev-parse', '--show-toplevel').stdout.trim();
+      if (!repo) continue;
+      const st = planState(repo, p.file ? { files: [p.file] } : { pending: true });
+      if (!st) continue;
+      const problems = st.missing.length ? [st.message] : [];
+      if (p.noVerify) problems.push(`git commit --no-verify (-n) skips the pre-commit plan check, and step(s) ${st.applies.map((s) => s.id).join(', ')} apply to this commit: commit without it`);
+      if (!problems.length) continue;
+      log = join(gatesRoot(st.cfg), 'observe.log');
+      mkdirSync(dirname(log), { recursive: true });
+      note({ mode: st.mode, branch: st.branch, missing: st.missing.map((s) => s.id), files: st.files.slice(0, 20), ...(p.noVerify ? { noVerify: true } : {}), ...(st.mode === 'enforce' ? { refused: true } : {}) });
+      if (st.mode === 'enforce') refused.push(problems.join('\n'));
+      else told.push(`lc-gate (observe mode): this ${p.point} went ahead, but gate_pr_plan: enforce would refuse it: ${problems.join('\n')}`);
+    } catch (err) {
+      try {
+        note({ error: err.message });
+      } catch {
+        // nowhere to log
+      }
+      told.push(`lc-gate hook could not check the plan for this ${p.point}, so it goes ahead unchecked: ${err.message}`);
+    }
   }
   for (const p of points) {
     let log = null;
@@ -830,7 +1000,7 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
 
 // --- main --------------------------------------------------------------------------------------
 
-const BOOLEAN = new Set(['carry', 'write', 'trailer']);
+const BOOLEAN = new Set(['carry', 'write', 'trailer', 'staged', 'files']);
 function parseArgs(argv) {
   const pos = [];
   const flags = {};
@@ -848,8 +1018,8 @@ export async function main(argv, cwd = process.cwd()) {
   const [cmd, ...rest] = argv;
   const repo = exec('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { ok: true }).stdout.trim() || cwd;
   const { pos, flags } = parseArgs(rest);
-  const commands = { run, record, status, hook, check: (r, p, f) => (f.diff ? checkPhaseDiff(r, f.diff, p[1]) : checkGate(r, p, f)) };
-  if (!commands[cmd]) die(`usage: lc-gate run|record|status|check …; see the top of gate/gate.mjs`);
+  const commands = { run, record, status, hook, 'plan-check': (r, p, f) => planCheck(r, p, f, cwd), check: (r, p, f) => (f.diff ? checkPhaseDiff(r, f.diff, p[1]) : checkGate(r, p, f)) };
+  if (!commands[cmd]) die(`usage: lc-gate run|record|status|check|plan-check|hook …; see the top of gate/gate.mjs`);
   return (await commands[cmd](repo, pos, flags)) ?? 0;
 }
 

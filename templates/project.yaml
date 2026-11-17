@@ -76,6 +76,7 @@ gate:
 # `if <key>` runs the step only when the change touches a glob under paths.<key>.
 # Keep " #" and " — " out of a step line: the reader cuts a value there.
 gate_pr_mode: observe                     # off | observe (warn) | enforce (refuse)
+gate_pr_plan: observe                     # a step ending in `plan`: edits and commits without its plan; off | observe | enforce
 
 paths:                                    # globs separated by spaces; ** spans directories
   flow: <globs of code a person or agent uses, e.g. apps/web/** packages/api/**>

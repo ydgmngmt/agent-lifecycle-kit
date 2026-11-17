@@ -16,6 +16,8 @@
 
 A `here` or `session` step whose line ends in `plan` (`stack-fit: here docs/review/stack-fit.md plan`) also needs a plan, recorded with `lc-gate record pr <branch> <step> plan --evidence <file>` before the branch's first commit and refused after it, so the session plans from the project's chosen tools before it designs its own code. `check` requires that plan beside the step's final record, and a branch that had commits before the gate saw it gets a plan N/A with a reason from the lead.
 
+The plan is enforced before the work, under `gate_pr_plan: off | observe | enforce` in the project file (default `observe`, independent of `gate_pr_mode`). `lc-gate plan-check [--staged] [--files <path>…]` fails when a planned step applies (the files are under its `if` paths, or it has none; the branch is not the default branch) and the branch has no plan record; files under `.agents/` never count, so the plan can be written there. The plugin's hook runs it on every `Edit`, `Write`, `MultiEdit` and `NotebookEdit` of a file in the repository and on every `git commit` (on every changed file), and refuses `git commit --no-verify` while a planned step applies: in enforce mode it refuses, in observe mode it logs to `<gates>/observe.log` and tells the session. For agents without Claude Code hooks, install the git hook: copy `templates/githooks/pre-commit` to `.githooks/pre-commit` and run `git config core.hooksPath .githooks` (it passes, with one line, where `lc-gate` is not on PATH; `core.hooksPath` replaces `.git/hooks`, so move any hook kept there).
+
 What a record proves, and what it doesn't: a workflow row is checked against the run on GitHub, and a review or `here` row against its committed findings file. Who wrote a record rests on the environment: a session spawned for one step carries `LC_GATE_STEP`, and `lc-gate record` keeps it to that step, never N/A or a carry. A session that unsets the variable is treated as the lead. The gate catches skipped steps and stale or failed results, not a session working against it.
 
 A phase's id in `lc-gate run phase <id>` is its roadmap heading's name in lower case with dashes (`## Core journeys (current)` is `core-journeys`), as on the board; the CI check requires a phase marked done to link the record of that id.
@@ -39,10 +41,10 @@ The `lifecycle` skill holds the full map of steps, roles and skills.
 | `skills/board` | How every session uses the owner's board, and the keeper session that keeps it true |
 | `skills/update-docs` | "Update the docs": one sweep that brings the domain docs and the lifecycle docs in line with what was decided and built |
 | `skills/bootstrap` | A guided, resumable readiness check that takes a repository to ready (`checklist.md`) |
-| `gate/`, `bin/lc-gate` | The gate runner: `run`, `record`, `status`, `check` |
+| `gate/`, `bin/lc-gate` | The gate runner: `run`, `record`, `status`, `check`, `plan-check`, and the `hook` of `hooks/hooks.json` |
 | `bin/lc-spawn`, `lc-close`, `lc-view` | Start, close and watch agent sessions in tmux |
 | `board/`, `bin/lc-board` | The owner's local page: phases, journeys, changes and criteria from the roadmap, live PRs and sessions, and the open questions with a place to answer them |
-| `templates/` | `project.yaml` with the gate blocks, the review question files (`review/*.md`), the gate brief, lifecycle, roadmap, acceptance criteria, testing, the phase exit's values and record, brief, watchdog prompt, CI for the pr, nightly and phase profiles |
+| `templates/` | `project.yaml` with the gate blocks, the review question files (`review/*.md`), the gate brief, lifecycle, roadmap, acceptance criteria, testing, the phase exit's values and record, brief, watchdog prompt, CI for the pr, nightly and phase profiles, the git `pre-commit` hook (`githooks/`) |
 | `docs/adlc.png` | The diagram |
 
 The skills invoke the [mattpocock-skills](https://github.com/mattpocock/skills) set (`grilling`, `domain-modeling`, `research`, `prototype`, `codebase-design`, `tdd`, `diagnosing-bugs`, `code-review`, `pr`, `writing-for-agents`). Install it alongside this kit.

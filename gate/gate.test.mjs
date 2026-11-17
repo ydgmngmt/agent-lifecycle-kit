@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -207,4 +207,95 @@ test('a command step does not run on a dirty tree', () => {
   const out = lc({}, 'run', 'phase', 'x', '--base', 'HEAD');
   assert.match(out.stdout, /uncommitted changes/);
   assert.match(lc({}, 'check', 'phase', 'x').stderr, /build: missing/);
+});
+
+// The plan enforced before the work: plan-check, and the hook on edits and commits (gate_pr_plan).
+function planned(mode) {
+  const p = project(`${PLANNED}${mode ? `gate_pr_plan: ${mode}\n` : ''}`);
+  const gate = fileURLToPath(new URL('./gate.mjs', import.meta.url));
+  p.hook = (tool, input) =>
+    spawnSync('node', [gate, 'hook'], { cwd: p.repo, encoding: 'utf8', env: { ...process.env, LC_GATE_STEP: '' }, input: JSON.stringify({ tool_name: tool, cwd: p.repo, tool_input: input }) });
+  p.edit = (file) => p.hook('Edit', { file_path: join(p.repo, file), old_string: 'a', new_string: 'b' });
+  p.plan = () => {
+    writeFileSync(join(p.repo, '.agents/plan.md'), 'I will call parse (docs/api.md) for the input.');
+    const r = p.lc({}, 'record', 'pr', 'feat', 'fit', 'plan', '--evidence', '.agents/plan.md');
+    assert.equal(r.status, 0, r.stderr);
+  };
+  return p;
+}
+
+test('enforce refuses an edit to a matching file with no plan, and allows it after the plan', () => {
+  const p = planned('enforce');
+  p.git('git checkout -q -b feat');
+  const r = p.edit('src/a.js');
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /lc-gate record pr feat fit plan --evidence <file>/);
+  assert.match(r.stderr, /docs\/fit\.md/);
+  assert.equal(p.lc({}, 'plan-check', '--files', 'src/a.js').status, 1);
+  p.plan();
+  assert.equal(p.edit('src/a.js').status, 0);
+  assert.equal(p.lc({}, 'plan-check', '--files', 'src/a.js').status, 0);
+});
+
+test('a file outside the step paths, and every file on main, goes through', () => {
+  const p = planned('enforce');
+  assert.equal(p.edit('src/a.js').status, 0); // on main
+  assert.equal(p.lc({}, 'plan-check', '--files', 'src/a.js').status, 0);
+  p.git('git checkout -q -b feat');
+  assert.equal(p.edit('docs/notes.md').status, 0);
+  assert.equal(p.lc({}, 'plan-check', '--files', 'docs/notes.md').status, 0);
+});
+
+test('observe (the default) logs and lets the edit through', () => {
+  const p = planned('');
+  p.git('git checkout -q -b feat');
+  const r = p.edit('src/a.js');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /observe mode.*\n?.*lc-gate record pr feat fit plan/s);
+  assert.match(readFileSync(join(p.repo, 'state/gates/observe.log'), 'utf8'), /"point":"plan".*"missing":\["fit"\]/);
+  assert.equal(p.lc({}, 'plan-check', '--files', 'src/a.js').status, 0);
+});
+
+test("the lead's N/A plan lets the work through", () => {
+  const p = planned('enforce');
+  p.git('git checkout -q -b feat && git commit -q --allow-empty -m early');
+  assert.equal(p.edit('src/a.js').status, 2);
+  assert.equal(p.lc({}, 'record', 'pr', 'feat', 'fit', 'plan', 'na', '--reason', 'work began before the gate').status, 0);
+  assert.equal(p.edit('src/a.js').status, 0);
+});
+
+test('a commit is checked on its files, and --no-verify is refused only where a planned step applies', () => {
+  const p = planned('enforce');
+  const commit = (cmd) => p.hook('Bash', { command: cmd });
+  p.git('git checkout -q -b feat && mkdir -p src docs && echo x > src/a.js && echo y > docs/n.md');
+  assert.equal(commit('git add -A && git commit -m work').status, 2);
+  p.git('git add docs/n.md');
+  assert.equal(p.lc({}, 'plan-check', '--staged').status, 0);
+  p.git('git add src/a.js');
+  assert.equal(p.lc({}, 'plan-check', '--staged').status, 1);
+  p.plan();
+  assert.equal(commit('git commit -m work').status, 0);
+  const nv = commit('git commit --no-verify -m work');
+  assert.equal(nv.status, 2);
+  assert.match(nv.stderr, /--no-verify/);
+  assert.equal(commit('git commit -anm work').status, 2);
+  p.git('git commit -qm work && git checkout -q main && mkdir -p docs && echo z > docs/m.md && git add docs/m.md');
+  assert.equal(commit('git commit -n -m on-main').status, 0);
+  writeFileSync(join(p.repo, '.agents/project.yaml'), PLANNED.replace('$STATE', `${p.repo}/state`).replace(' plan\n', '\n') + 'gate_pr_plan: enforce\n');
+  p.git('git checkout -q -b other && mkdir -p src && echo w > src/b.js && git add src/b.js');
+  assert.equal(commit('git commit --no-verify -m no-planned-step').status, 0);
+});
+
+test('the pre-commit template runs plan-check on the staged files', () => {
+  const p = planned('enforce');
+  const kit = fileURLToPath(new URL('..', import.meta.url));
+  p.git(`mkdir -p .githooks && cp ${kit}templates/githooks/pre-commit .githooks/ && git config core.hooksPath .githooks`);
+  p.git('git checkout -q -b feat && mkdir -p src && echo x > src/a.js && git add src/a.js');
+  const env = { ...process.env, PATH: `${kit}bin:${process.env.PATH}` };
+  const r = spawnSync('git', ['commit', '-qm', 'work'], { cwd: p.repo, encoding: 'utf8', env });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /lc-gate record pr feat fit plan/);
+  const bare = spawnSync('git', ['commit', '-qm', 'work'], { cwd: p.repo, encoding: 'utf8', env: { ...process.env, PATH: '/usr/bin:/bin' } });
+  assert.equal(bare.status, 0, bare.stderr);
+  assert.match(bare.stderr, /lc-gate is not on PATH/);
 });
