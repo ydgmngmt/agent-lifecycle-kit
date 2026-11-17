@@ -23,6 +23,8 @@ The skills call the [mattpocock-skills](https://github.com/mattpocock/skills) se
 2. **`lc-gate enforcement`**: one line per gate step and layer, saying who records it, what refuses without it, and whether that is actually on. `--strict` exits 1 when a configured layer is off.
 3. **`lc-gate protect`**: prints the branch protection for `ci.required_checks`; `--yes` applies it. It only ever adds.
 
+**Mechanical rules.** What the project decided and a diff can break exactly (who may import a package, which dependencies are allowed, words or files that may not appear) becomes a rule in `.agents/rules.yaml`. Each rule names its written decision and is proved on a red and a green example; `lc-rules check` fails a finding beyond the baseline, and CI judges each change by the base commit's rules. The bootstrap writes the first ones; the phase exit proposes more from findings the reviews keep raising, and the owner decides.
+
 ## What enforces what
 
 | Strength | Who | What it refuses |
@@ -42,7 +44,7 @@ The skills call the [mattpocock-skills](https://github.com/mattpocock/skills) se
 ## More
 
 - [Enforcement](docs/enforcement.md): the model, the modes, the step syntax, the commands
-- [Upgrading](docs/upgrading.md): 0.8 to 1.0, 1.0 to 1.1, and 1.1 to 1.2
+- [Upgrading](docs/upgrading.md): 0.8 to 1.0, 1.0 to 1.1, 1.1 to 1.2, and 1.2 to 1.3
 - [Machine-specific pieces](docs/machine.md)
 - [Proof (in progress)](docs/proof.md)
 - [The lifecycle skill](skills/lifecycle/SKILL.md): steps, roles and gates

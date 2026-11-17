@@ -132,7 +132,7 @@ merge:
 # The files that define the rules change only in a PR the owner reads. Globs; or a pointer `file#key`
 # to a list kept elsewhere. lc-gate enforcement names each rule file missing from it.
 owner_approval: [.agents/project.yaml, .agents/ci/**, .githooks/**, .github/workflows/**, docs/review/**, docs/review-checklist.md, docs/stack-decisions.md, docs/stack-tools.md, docs/stack-exceptions.md]
-protected_files: [.agents/project.yaml, .agents/ci/**, .githooks/**, .github/workflows/**, docs/review/**, docs/review-checklist.md, docs/stack-decisions.md, docs/stack-tools.md, docs/stack-exceptions.md]
+protected_files: [.agents/project.yaml, .agents/rules.yaml, .agents/rules-baseline.json, .agents/ci/**, .githooks/**, .github/workflows/**, docs/review/**, docs/review-checklist.md, docs/stack-decisions.md, docs/stack-tools.md, docs/stack-exceptions.md]
 pinned_files: []                          # change only when a brief schedules it
 sensitive: <sensitive code paths, approved by an independent reviewer session (where they are listed, or the list)>
 
@@ -161,6 +161,7 @@ sessions:                                 # read by lc-spawn, lc-close, lc-view
   effort: <effort>
   gate_model: opus                        # the gate sessions lc-gate run starts; never the lead's LC_MODEL
   gate_effort: xhigh
+  # gate_parallel: <n>                    # how many gate sessions lc-gate run starts at a time; unset: all at once
   agent_flags: ""
   max_subagents: <n>                      # how many subagents one session runs at a time
   owner_read: <command that opens a diff or doc for the owner>

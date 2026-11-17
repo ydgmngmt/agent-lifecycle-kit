@@ -30,7 +30,8 @@ printf '%s\\n' "$*" >>"${fake}/calls"
 case "$1" in
   list-windows) cat "${fake}/windows" 2>/dev/null ;;
   capture-pane) cat "${fake}/pane" 2>/dev/null ;;
-  new-window|new-session) echo @7 ;;
+  new-window|new-session) n=$(cat "${fake}/n" 2>/dev/null || echo 6); n=$((n + 1)); echo $n >"${fake}/n"; echo @$n ;;
+  send-keys) [ -e "${fake}/sticky" ] || echo working >"${fake}/pane" ;;
 esac
 exit 0
 `, { mode: 0o755 });
@@ -73,6 +74,7 @@ test("lc-spawn answers the folder-trust prompt for a folder of the repository's 
   assert.match(f.calls(), /^send-keys -t @7 Enter$/m);
   assert.match(r.stdout, /answered Claude Code's folder-trust prompt/);
   mkdirSync(join(handoff, 'briefs'), { recursive: true });
+  f.pane(TRUST);
   const h = f.spawn(join(handoff, 'briefs'), f.repo);
   assert.match(h.stdout, /answered/, h.stdout + h.stderr);
   assert.equal(f.calls().match(/^send-keys/gm).length, 2);
@@ -86,6 +88,38 @@ test('lc-spawn leaves the prompt for a folder outside them, and says what the se
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(f.calls(), /send-keys/);
   assert.match(r.stdout, /s1 is waiting on Claude Code's folder-trust prompt for .*lc-outside-/);
+});
+
+test('lc-spawn says the prompt was answered only once the pane no longer shows it', () => {
+  const f = fixture(SESSION);
+  f.pane(TRUST);
+  writeFileSync(join(f.fake, 'sticky'), '');
+  const r = f.spawn(f.repo, f.repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(f.calls(), /^send-keys/m);
+  assert.doesNotMatch(r.stdout, /answered/);
+  assert.match(r.stdout, /s1 is still waiting on Claude Code's folder-trust prompt for .*: answer it in tmux window/);
+});
+
+test('sessions.gate_parallel: lc-gate run starts that many session steps at a time; unset, all', () => {
+  const TWO = 'handoff_dir: $STATE\ngate_phase:\n  one: session q.md\n  two: session q.md\n  three: session q.md\n';
+  const all = fixture(TWO);
+  all.pane('working\n');
+  assert.equal(all.lc('run', 'phase', 'x', '--base', 'HEAD').stdout.match(/started session/g).length, 3);
+  const f = fixture(`${TWO}sessions:\n  gate_parallel: 1\n`);
+  f.pane('working\n');
+  const first = f.lc('run', 'phase', 'x', '--base', 'HEAD').stdout;
+  assert.equal(first.match(/started session/g).length, 1, first);
+  assert.match(first, /two\s+session\s+waits: 1 session\(s\) running, sessions\.gate_parallel is 1/);
+  f.windows('@7\tgate-x-one\n');
+  const second = f.lc('run', 'phase', 'x').stdout;
+  assert.doesNotMatch(second, /started session/);
+  assert.match(second, /three\s+session\s+waits/);
+  f.windows('');
+  f.sh(`mkdir -p state/gates/phase/x/records && printf '%s' '{"step":"one","status":"pass","sha":"'$(git rev-parse HEAD)'","by":"s","at":"t"}' > state/gates/phase/x/records/one.json`);
+  const third = f.lc('run', 'phase', 'x').stdout;
+  assert.match(third, /two\s+session\s+started session gate-x-two/, third);
+  assert.match(third, /three\s+session\s+waits/);
 });
 
 test('lc-gate run reports a started session that shows no activity for 60 seconds', () => {

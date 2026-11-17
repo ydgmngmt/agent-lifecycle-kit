@@ -1,0 +1,33 @@
+# .agents/rules.yaml: the project's mechanical rules, run by lc-rules (rules/rules.mjs in the kit).
+# A rule enforces a decision the project has written down, decides exactly, and is shown failing its red
+# example and passing its green one: `lc-rules selftest`. Existing findings go in
+# .agents/rules-baseline.json once (`lc-rules baseline`), which then only shrinks (`--prune`).
+# CI runs `lc-rules check --base <base>`: the base commit's copy of this file and the baseline judge.
+# Both files are protected_files. Kinds: import, dependency, text, path (see rules/rules.mjs).
+#
+# Three starter rules: uncomment one, point it at your decision and your paths, run selftest.
+rules:
+#   - id: http-client-owned
+#     decision: docs/decisions/0001-http-client.md
+#     message: Call the HTTP client through src/http only.
+#     kind: import
+#     package: axios
+#     owners: [src/http/]
+#     red: { file: src/orders/load.ts, text: "import axios from 'axios';" }
+#     green: { file: src/http/client.ts, text: "import axios from 'axios';" }
+#   - id: dependencies-chosen
+#     decision: docs/decisions/0002-stack.md
+#     message: Only the dependencies the stack decision chose; a new one needs a decision first.
+#     kind: dependency
+#     paths: [package.json]
+#     allow: [react, react-dom, zod, typescript, vitest, "@types/*"]
+#     red: { file: package.json, text: '{"dependencies": {"lodash": "4.17.21"}}' }
+#     green: { file: package.json, text: '{"dependencies": {"zod": "3.23.8"}}' }
+#   - id: no-raw-sql-files
+#     decision: docs/decisions/0003-migrations.md
+#     message: SQL lives in migrations only.
+#     kind: path
+#     paths: ["**/*.sql"]
+#     except: [db/migrations/]
+#     red: { file: src/reports/totals.sql, text: "" }
+#     green: { file: db/migrations/0001_init.sql, text: "" }

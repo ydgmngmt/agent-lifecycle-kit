@@ -22,7 +22,7 @@ The regression run and the "built as described" session decide the criteria. Eac
 
 - **Findings:** one list of every gate session's findings, run failures and live bugs. Read each cited line and give it a disposition ([finding.md](../lifecycle/finding.md)). A failed criterion is blocking; the rest become follow-up PRs or issues in the roadmap. Each live bug gets a regression check in its fix PR.
 - **Fix and retest:** each blocking finding goes through a session (the PR's implementer if still running, else a fresh one) and the PR gate. The fixes make a new `CANDIDATE` and every record stale: rerun the steps they affect (`lc-gate run phase <id> --candidate <new>`; `--rerun <step>,<step>` for review sessions, after `lc-close <name>` on the old windows), and carry the others with a reason a reader can check (`lc-gate record phase <id> <step> <status> --carry --reason "<why the fix can't change it>"`). A carry keeps the old status and evidence: only from PASS or N/A, without `--evidence`.
-- **Lessons:** a finding seen in two or more PRs, readable from a diff, becomes a proposed `docs.review_checklist` item with its severity; an item that no longer catches anything is proposed for removal. The owner decides.
+- **Lessons:** a finding seen in two or more PRs, readable from a diff, becomes a proposed `docs.review_checklist` item with its severity; when it can be decided exactly, a proposed rule in `.agents/rules.yaml` instead, naming the written principle it serves (none written: no rule). An item that no longer catches anything is proposed for removal; a sound rule is not trimmed. The owner decides.
 
 Only you record N/A or a carry, each with its reason.
 

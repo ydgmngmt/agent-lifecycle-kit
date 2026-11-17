@@ -28,6 +28,13 @@ jobs:
           ref: <pinned kit commit>
           path: .lc-kit
           persist-credentials: false
+      # The mechanical rules (.agents/rules.yaml): each proved red and green, then judged by the base
+      # commit's rules and baseline (lc-rules says loudly when this change edits them). It runs even
+      # without the file, so a change that deletes it is still judged by the base's rules.
+      - name: Mechanical rules
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: .lc-kit/bin/lc-rules selftest && .lc-kit/bin/lc-rules check --base "$BASE"
       # Judged by the base commit's project file (step list), so a PR can't drop a step to pass.
       - name: Phase record (the base commit's step list)
         env:

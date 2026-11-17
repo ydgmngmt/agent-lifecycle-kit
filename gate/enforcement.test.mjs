@@ -149,6 +149,20 @@ function gitOnly() {
   return dir;
 }
 
+test('enforcement: the mechanical rules layer, once .agents/rules.yaml exists', () => {
+  const r = repoWith();
+  r.gh.set('api.json', FULL(['verify-pr', 'pr-body']));
+  assert.doesNotMatch(r.lc(['enforcement']).stdout, /mechanical rules/);
+  writeFileSync(join(r.repo, '.agents/rules.yaml'), 'rules:\n');
+  let out = r.lc(['enforcement', '--strict']);
+  assert.equal(out.status, 1);
+  assert.match(line(out.stdout, /^mechanical rules/), /lc-rules check --base.*\boff\b: no workflow runs lc-rules check --base/);
+  assert.match(line(out.stdout, /^owner reads\s+\.agents\/rules\.yaml/), /\boff\b.*protected_files/);
+  writeFileSync(join(r.repo, '.github/workflows/pr.yml'), `${readFileSync(join(r.repo, '.github/workflows/pr.yml'), 'utf8')}      - run: .lc-kit/bin/lc-rules selftest && .lc-kit/bin/lc-rules check --base "$B"\n`);
+  out = r.lc(['enforcement']);
+  assert.match(line(out.stdout, /^mechanical rules/), /\bon: \.github\/workflows\/pr\.yml/);
+});
+
 test('enforcement --md prints a Markdown table', () => {
   const r = repoWith();
   r.gh.set('api.json', FULL(['verify-pr', 'pr-body']));

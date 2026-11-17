@@ -48,7 +48,8 @@
 // in a row (questions, answerProblems), and never N/A or a carry. Any other
 // caller is the lead (`by` is LC_SESSION, else "lead"). Nobody records a command step's pass (the runner
 // does, from its exit), and only the spawned session records a session step's pass (the lead: N/A, carry).
-// A session step runs on sessions.gate_model and sessions.gate_effort (opus, xhigh), never the lead's.
+// A session step runs on sessions.gate_model and sessions.gate_effort (opus, xhigh), never the lead's;
+// with sessions.gate_parallel <n>, run starts a session step only while fewer than <n> are running.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -454,6 +455,12 @@ async function run(repo, [gate, idArg], flags) {
   for (const x of rerun) if (!g.steps.some((s) => s.id === x)) die(`--rerun ${x}: no such step`);
   let above = true; // every step above has a record for the candidate
   let commits;
+  // sessions.gate_parallel: at most that many gate sessions at a time (unset: no limit). A live session
+  // of a step still without its record counts.
+  const parallel = Number(g.cfg.conf['sessions.gate_parallel']) || 0;
+  if (g.cfg.conf['sessions.gate_parallel'] && !(Number.isInteger(parallel) && parallel > 0)) die(`sessions.gate_parallel is "${g.cfg.conf['sessions.gate_parallel']}": a whole number above 0, or unset`);
+  ctx.parallel = parallel;
+  ctx.running = parallel ? g.steps.filter((s) => s.kind === 'session' && !(g.records[s.id] && current(g.records[s.id].sha)) && liveWindow(g.cfg, sessionName(ctx, s))).length : 0;
   // The after-gate steps last: they come after the review pipeline, which starts once the rest holds.
   for (const s of [...g.steps.filter((x) => !x.afterGate), ...g.steps.filter((x) => x.afterGate)]) {
     let r = g.records[s.id] && current(g.records[s.id].sha) && !rerun.has(s.id) ? g.records[s.id] : null;
@@ -493,6 +500,8 @@ async function run(repo, [gate, idArg], flags) {
   );
   return 0;
 }
+
+const sessionName = (ctx, s) => `gate-${ctx.id}-${s.id}`.replace(/[^\w.-]/g, '-');
 
 // The id of lc-spawn's tmux window of this name, else null.
 function liveWindow(cfg, name) {
@@ -596,7 +605,7 @@ const STEP = {
   },
 
   session(ctx, s) {
-    const name = `gate-${ctx.id}-${s.id}`.replace(/[^\w.-]/g, '-');
+    const name = sessionName(ctx, s);
     const brief = join(ctx.dir, 'briefs', `${s.id}-${ctx.sha.slice(0, 12)}.md`);
     // One session per step at a time: a live one (for this candidate or an earlier one) is waited for.
     const window = liveWindow(ctx.cfg, name);
@@ -605,6 +614,7 @@ const STEP = {
       return say(ctx, s, `session ${name} is running; waiting for its record (lc-close ${name} to stop it)${idle && `\n    ${name} ${idle}`}`);
     }
     if (existsSync(brief)) return say(ctx, s, `session ${name} ended without a record; start it again with --rerun ${s.id}`);
+    if (ctx.parallel && ctx.running >= ctx.parallel) return say(ctx, s, `waits: ${ctx.running} session(s) running, sessions.gate_parallel is ${ctx.parallel}`);
     const findings = join(ctx.dir, 'findings', `${s.id}.md`);
     mkdirSync(dirname(findings), { recursive: true });
     mkdirSync(dirname(brief), { recursive: true });
@@ -622,6 +632,7 @@ const STEP = {
       unlinkSync(brief); // the brief marks a started session; the next run tries again
       throw err;
     }
+    ctx.running++;
     // The window as it is now, so the next run sees whether anything changed.
     const started = liveWindow(ctx.cfg, name);
     if (started) idleNote(ctx, s, started);

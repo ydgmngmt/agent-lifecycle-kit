@@ -7,7 +7,7 @@ description: Use when you are a gate session (spawned by `lc-gate run` for one `
 
 Read-only: fix nothing. Write only your findings file, and a live session's screenshots, traces and logs into the evidence folder. Don't read other gate sessions' findings.
 
-1. **Questions.** `lc-gate questions <question file>` lists them as Q1, Q2, …: the file's top-level numbered and bulleted items. Read the whole file; it names the inputs and the base skills to invoke (`codebase-design` or `domain-modeling` for vocabulary; `code-review` against the base as a first pass, its output rewritten into the finding format).
+1. **Questions.** `lc-gate questions <question file>` lists them as Q1, Q2, …: the file's top-level numbered and bulleted items. Read the whole file; it names the inputs and the base skills to invoke (`codebase-design` or `domain-modeling` for vocabulary; `code-review` against the base as a first pass, its output rewritten into the finding format). A question file that answers by kind of diff (the checklist: prose only, rules only, or all) says which rows apply; the others are `no` (the kind) and `n/a`. A rules-only diff is one round: a way around a rule is a comment, never must-fix.
 2. **Code** at the candidate, in your own detached worktree (`git worktree add --detach <dir> <candidate>`) or with `git show` and `git diff <base> <candidate>`; never another session's worktree. Start from the evidence folder. Scope: the whole diff, or every file the phase touched. Prove a suspected sequence with `diagnosing-bugs`, else mark it needs-check.
 3. **Answer per item.** The findings file opens with one row per question. A question with no row fails the step: `lc-gate record` refuses the file.
 

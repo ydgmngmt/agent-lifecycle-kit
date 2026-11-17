@@ -11,6 +11,7 @@ import { homedir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { loadConfig } from '../board/config.mjs';
 import { KIT, die, exec, gateMode, globRe, modeText, parseSteps } from './gate.mjs';
+import { BASELINE, RULES } from '../rules/rules.mjs';
 
 const words = (v) => String(v ?? '').split(/[\s,]+/).filter(Boolean);
 const git = (repo, ...args) => exec('git', ['-C', repo, ...args], { ok: true, timeout: 10_000 }).stdout.trim();
@@ -180,9 +181,18 @@ function rows(repo) {
       'lc-gate check phase --diff in CI, once the roadmap marks the phase done', phaseCheck ? 'on' : 'off: no workflow runs lc-gate check phase --diff', Boolean(checks.length));
   }
 
+  // The mechanical rules (lc-rules), once the project has a rules file.
+  const hasRules = existsSync(join(repo, RULES));
+  if (hasRules) {
+    const rulesFlow = flows.find((w) => /lc-rules\S*\s+check\b[^\n]*--base/.test(w.text));
+    add('mechanical rules', `${RULES}, against ${BASELINE}`, 'lc-rules check --base in CI: the base commit\'s rules and baseline', 'a change breaking a rule beyond the baseline',
+      rulesFlow ? `on: ${rulesFlow.path}` : 'off: no workflow runs lc-rules check --base (templates/ci/pr.yml)', Boolean(checks.length));
+  }
+
   // The files that define the rules: each changes only in a pull request the owner reads.
   const listed = protectedGlobs(repo);
   const ruleFiles = new Set(['.agents/project.yaml']);
+  if (hasRules) ruleFiles.add(RULES).add(BASELINE);
   if (hook.path) ruleFiles.add(hook.path);
   for (const w of flows) if (checks.some((n) => definesJob(w.text, n)) || /lc-gate|from-base\.sh/.test(w.text)) ruleFiles.add(w.path);
   if (existsSync(join(repo, '.agents/ci'))) for (const f of readdirSync(join(repo, '.agents/ci'))) ruleFiles.add(`.agents/ci/${f}`);

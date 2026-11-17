@@ -1,6 +1,6 @@
 # Upgrading
 
-After either upgrade, rerun the `bootstrap` skill: it finds what is missing and walks each item.
+After any upgrade, rerun the `bootstrap` skill: it finds what is missing and walks each item.
 
 ## From 0.8 to 1.0
 
@@ -22,3 +22,11 @@ After either upgrade, rerun the `bootstrap` skill: it finds what is missing and 
 - **Review checklist:** `templates/review/checklist.md`, each item tagged `(must-fix)` or `(comment)`.
 - **New keys:** `sessions.gate_model` and `sessions.gate_effort` (default `opus`, `xhigh`) for the sessions `lc-gate run` starts.
 - **Sessions don't wait silently:** `lc-spawn` answers Claude Code's folder-trust prompt inside the repository's worktrees or `handoff_dir` and names it otherwise; `lc-gate run` reports a started session with no activity for 60 seconds.
+
+## From 1.2 to 1.3
+
+- **Mechanical rules.** `lc-rules` runs the rules of `.agents/rules.yaml` (`templates/rules.yaml`): each names the written decision it enforces and carries a red and a green example (`lc-rules selftest`). Existing findings go in `.agents/rules-baseline.json` once (`lc-rules baseline`), which then only shrinks (`--prune`). Run `./install.sh` again for the new link; the bootstrap's Rules stage (item 14b) writes the first rules.
+- **CI:** copy the rules step of `templates/ci/pr.yml`; it runs `lc-rules check --base`, judged by the base commit's rules and baseline. Add both files to `protected_files`; `lc-gate enforcement` shows the rules layer once the file exists.
+- **Review by kind of diff:** recopy `templates/review/checklist.md`, keeping your project's items: a prose-only diff answers the Docs items, a rules-only diff the Rules items, any other diff all of them.
+- **New key:** `sessions.gate_parallel`, how many gate sessions `lc-gate run` starts at a time; unset, all at once as before.
+- `lc-spawn` says the folder-trust prompt was answered only once the window no longer shows it.

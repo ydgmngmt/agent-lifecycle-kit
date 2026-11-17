@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# The rule runner: the mechanical rules of .agents/rules.yaml (rules/rules.mjs).
+exec node "$(dirname "$(dirname "$(readlink -f "$0")")")/rules/rules.mjs" "$@"
