@@ -1,21 +1,39 @@
 ---
 name: phase-exit
-description: Use when a phase's PRs have all merged and the phase must be verified against its acceptance criteria, reviewed and closed.
+description: Use when a phase's PRs have all merged and the phase must be verified against its acceptance criteria, reviewed, accepted and closed, or when rerunning its steps after a fix. You are the lead running `lc-gate run phase`.
 ---
 
 # Phase exit
 
-The project's procedure is `docs.phase_review`; this is the order and who does what.
+The check of a phase's integrated result against its acceptance criteria. A PR's review sees one change; this one sees what the changes add up to. The steps are the project's `gate_phase:` block; the project's values for them (evidence commands, what the phase profile runs) are in `docs.phase_review`.
 
-1. **Freeze.** `START` is main before the phase's first merge. `CANDIDATE` is main after its last merge, with green CI and a green nightly on it, or one started now. Everything below reads `CANDIDATE` from a detached worktree.
-2. **Evidence folder.** One session collects the review evidence using the commands in `docs.phase_review`. No judgment at this step.
-3. **Browser E2E and other checks**, on a lane: invoke `phase-run`. It records pass or fail for each acceptance criterion, with traces and the commit SHA.
-4. **Phase review**, alongside the run. One session per dimension: `review-owners-layers`, `review-reuse`, `review-types-boundaries`, `review-effects-security`, `review-docs-tests`, plus `duplication-check` and `dead-code-check`. One session may take them in order for a small phase.
-5. **Disposition.** The lead reads the cited lines of every finding and gives each a disposition ([finding.md](../lifecycle/finding.md)).
-   - A **failed acceptance criterion blocks** the phase.
-   - Every other finding becomes a **follow-up PR** or an issue. It is tracked in the roadmap and doesn't block.
-   - Each bug found live adds a regression check to the phase run.
-6. **Fix and retest.** Blocking failures loop back to implementation. The orchestrator gives each fix to a session: the PR's implementer if it is still running, otherwise a fresh one. Each fix passes `pr-check`, and the phase-run steps for its criteria are rerun at the new candidate.
-7. **Present to the owner.** A passed check is not acceptance. Show the owner each of the phase's journeys run live on a fresh stack, and give him, per journey, the exact steps to try it himself. He decides whether the phase is accepted.
-8. **Exit.** When every acceptance criterion passes and the owner has accepted the journeys, the phase exits and the next one starts. Run `update-docs` to bring both sets of documents in line with what was built. Freeze also runs the full integration suite once on `CANDIDATE`, after the last merge. Exit needs a green phase run on `CANDIDATE` (the workflow run URL where the project has one) with every MANUAL row decided. Write the phase record (`docs.phase_records`): the phase run URL, both commits, the evidence per criterion, the PRs, each finding with its disposition and follow-up, and the time each step took.
-9. **Close.** A phase is closed only after its run passes and its review findings are fixed and verified again: the follow-up PRs merged, and the phase-run steps they affect rerun green. Exit lets the next phase start; close is when the phase record says nothing is left open. Mark the phase closed in the roadmap and the record then.
+## Run it
+
+1. **Freeze.** `START` is main before the phase's first merge. `CANDIDATE` is main after its last merge, with green push CI on it. Everything reads `CANDIDATE`, from a detached worktree.
+2. `lc-gate run phase <id> --candidate <CANDIDATE> --base <START>`. Rerun it until every step has a record; `lc-gate status phase <id>` shows where each stands. The runner runs the commands, starts the workflows and spawns the review sessions; the `here` steps below are yours, and the `owner` step is a board question.
+3. Record a `here` step with its evidence file in `<handoff_dir>/gates/phase/<id>/evidence/`: `lc-gate record phase <id> <step> pass|fail --evidence <file>`.
+4. When every step holds, write the phase record: `lc-gate status phase <id> --write` (into `docs.phase_records`, shaped as [the phase record template](../../templates/phase-review.md)), and commit it. CI's `lc-gate check phase --diff` refuses a phase marked done without it.
+
+## Evidence per criterion
+
+The regression run and the live "built as described" session decide the criteria. Each criterion gets PASS or FAIL with its trace (log, screenshot, network trace) and the commit SHA, in the phase's acceptance file.
+- PASS only when a run or a session saw it pass at `CANDIDATE`.
+- A criterion no step decided is NOT TESTED, never PASS.
+- A step that needs a person or a live model is MANUAL, with what it needs; it is done by hand and its result written in the same table. Exit needs every MANUAL row decided.
+
+## The `here` steps
+
+- **Findings:** one list of every gate session's findings, the run failures and the live bugs. Read the cited lines of each and give it a disposition ([finding.md](../lifecycle/finding.md)). A failed acceptance criterion is blocking; other findings become follow-up PRs or issues, tracked in the roadmap. Each bug found live gets a regression check in its fix PR.
+- **Fix and retest:** each blocking finding goes to a session (the PR's implementer if still running, otherwise a fresh one) and through the PR gate. The fixes make a new `CANDIDATE`, so every record goes stale: rerun the steps the fixes affect (`lc-gate run phase <id> --candidate <new>`), and carry the others with a reason a reader can check (`lc-gate record phase <id> <step> <status> --carry --reason "<why the fix can't change it>"`).
+- **Lessons:** a finding seen in two or more PRs, and readable from a diff, becomes a proposed rule for `docs.review_checklist`; a rule that no longer catches anything is proposed for removal. The owner decides.
+
+Only you, the lead, record N/A or a carry, each with its reason; both show in the phase record and on the board.
+
+## Acceptance
+
+A passed check is not acceptance. The `owner` step asks the owner on the board, with each of the phase's journeys and the exact steps to try it on a fresh stack. The owner's answer is the record.
+
+## Exit and close
+
+- **Exit:** every step holds, every criterion passes, and the owner accepted. The next phase starts. Run `update-docs`.
+- **Close:** later, when the follow-up PRs have merged and the steps they affect were rerun green. Mark the phase closed in the roadmap and the record then.

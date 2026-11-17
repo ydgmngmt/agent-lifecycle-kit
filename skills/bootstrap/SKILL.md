@@ -1,6 +1,6 @@
 ---
 name: bootstrap
-description: Use when a repository should be made ready for the ADLC, new or existing, when it has no `.agents/project.yaml` yet, or when the user asks whether a project is ready to start a phase. A guided, resumable readiness check.
+description: Use when a repository should be made ready for the ADLC, new or existing, when it has no `.agents/project.yaml` yet, when its gate steps or review question files are missing, or when the user asks whether a project is ready to start a phase. A guided, resumable readiness check.
 ---
 
 # Bootstrap: readiness check

@@ -1,6 +1,6 @@
 # Finding format
 
-Every review writes findings in this format: the PR reviewer, the phase-review dimensions, and the duplication and dead-code checks. When `code-review` is used, its Standards and Spec findings are rewritten into this format; this format is the one that is reported.
+Every review writes findings in this format: each gate session (`review`), and the self-review and live check of the PR gate. When `code-review` is used, its Standards and Spec findings are rewritten into this format; this format is the one that is reported.
 
 ```
 ### <ID> <one line>
@@ -17,7 +17,7 @@ Every review writes findings in this format: the PR reviewer, the phase-review d
 
 A reviewer's file holds its findings, then **Checked and sound** (one line per area, with the file that shows it) and **Not examined**. A clean result is valid. Every finding has a `path:line`. Give no general advice, and don't invent findings to fill the list.
 
-**Dispositions**, set by whoever merges the lists:
+**Dispositions**, set by the lead, who reads the cited lines of every finding:
 - **blocking:** a failed acceptance criterion. It goes back to implementation, and the phase doesn't exit until it passes.
 - **follow-up:** a fix or defect that a follow-up PR takes. It is tracked in the roadmap and doesn't block the exit.
 - **issue:** needs design, or reaches beyond the change.

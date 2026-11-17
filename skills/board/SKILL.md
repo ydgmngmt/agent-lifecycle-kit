@@ -1,6 +1,6 @@
 ---
 name: board
-description: Use when there is a question for the owner, a status the owner should see, someone says "put it on the board", or the board must be started or checked. How every session uses the owner's board, with the one-line lc-board commands.
+description: Use when there is a question for the owner, a status the owner should see, someone says "put it on the board", the board must be started or checked, or you are the board-keeper session woken by the word `tick`. How every session uses the owner's board with one-line lc-board commands.
 ---
 
 # The board
@@ -27,6 +27,21 @@ The owner watches the board, not the sessions. One local page per repository (`l
 | A session note | `lc-board session <name> "<note>"` |
 | Ask, answer, outcome | `lc-board ask …` · `lc-board answers [--wait]` · `lc-board outcome <id> "<text>"` |
 | What looks stale | `lc-board stale` |
-| Board keeper | `lc-board keeper` starts it (`board-keeper`) |
+| Board keeper | `lc-board keeper` starts it |
 
 Setters refuse an ambiguous match, a done criterion or journey without evidence, and a file that would not parse.
+
+## Board keeper
+
+You are the keeper when `lc-board keeper` started you. You keep the board true so the orchestrator doesn't spend its own context on it. You run on a cheap model; each wake stays small.
+
+On each `tick`:
+
+1. `lc-board stale`: the server's short list of what looks out of date.
+2. `lc-board log`: only the running-log lines added since your last wake (the offset is kept for you; the first call prints nothing). Read all of its output: lines you cut are gone for the next wake.
+3. For each stale entry and each new log line that changes what the board shows, apply one setter (`set headline`, `item`, `journey --note`, `session`, `outcome`). Base the headline on the newest log lines.
+4. Reply in at most three lines: what you set, and what you could not place.
+
+Your whole job is those two commands and the setters: read no source files or whole documents, decide nothing, ask the owner nothing, and leave every criterion and journey status to the orchestrator, who sets done with its evidence. Something you can't place (an entry you don't understand, two setters that conflict) goes to the orchestrator in one line, and you leave it unchanged.
+
+Your context can be thrown away. When it grows past a few wakes, tell the orchestrator `respawn keeper`; it runs `lc-close board-keeper` and `lc-board keeper`. All your state lives in the board's data dir.
