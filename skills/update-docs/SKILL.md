@@ -5,23 +5,23 @@ description: Use when the owner or the orchestrator says "update the docs", "doc
 
 # Update the docs
 
-"Update the docs" means one thing: bring two sets of repository documents in line with what was decided and built since the last run, and nothing else. These documents keep the repository in check. Docs only: no code, no tests.
+Bring two sets of documents in line with what was decided and built since the last run. Docs only: no code, no tests.
 
 ## The two sets
 
-The project file names the paths: `docs.domain_set` and `docs.lifecycle_set` in `.agents/project.yaml`. Where it doesn't, use these:
+`docs.domain_set` and `docs.lifecycle_set` in the project file; where it has none:
 
-1. **Domain docs:** the glossary, the decision records (ADRs), the product requirements and user stories, the user journeys, the product principles, the base skills' setup docs (issue tracker, triage labels, domain-docs layout), and the issue tracker itself: issues opened, closed, relabelled or linked to their PRs to match. Invoke `domain-modeling` for this set. A glossary entry says what a term means, with no implementation detail. Write an ADR only for a decision that is hard to reverse, surprising without its context, and a real trade-off.
-2. **Lifecycle docs:** the lifecycle page, the project file, the roadmap, the phase acceptance files, the phase-exit values and phase records, the review question files, orchestration, the code map, the review checklist, the testing rules, the gate runbook and the agent instruction files (AGENTS.md, CLAUDE.md). Where a rule is general rather than the project's own, it belongs in this kit as well.
+1. **Domain:** glossary, ADRs, product requirements and stories, journeys, product principles, the base skills' setup docs (issue tracker, triage labels, domain-docs layout), and the issues themselves (opened, closed, relabelled or linked to their PRs). Invoke `domain-modeling`. A glossary entry says what a term means, with no implementation detail. An ADR only for a decision hard to reverse, surprising without context, and a real trade-off.
+2. **Lifecycle:** the lifecycle page, project file, roadmap, acceptance files, phase-exit values and records, review question files and checklist, orchestration, code map, testing rules, gate runbook, AGENTS.md and CLAUDE.md. A general rule belongs in this kit as well.
 
 ## The sweep
 
-1. **Start point.** Read the last line of the run log (`update_docs.log` in the project file). It gives the date and the main commit of the last run. With no log, start from the last phase exit, or ask the orchestrator for a start date.
-2. **List what happened since:** every decision (from the running log in `handoff_dir`, the briefs written since the start point, and the owner's answers on the board) and every merged behaviour change (`git log --merges <start commit>..origin/main`, and each PR's body). One line each, with its source.
-3. **Check each item against both sets.** For each document it touches: already true, stale (say what), or missing. A document that says something the code or a decision no longer supports is stale too.
-4. **Fix what is stale,** in plain words, with the glossary's terms, and without quoting the owner. Keep each edit to the lines that are wrong.
-   - Non-protected documents: one PR, through the usual PR gate (`pr-gate`) (the evidence is that each changed claim is true at the head and every link resolves).
-   - Protected files (`protected_files`): their own PR, each hunk listed in its body, for the owner to read.
-   - A clash between two documents, or a decision nobody has made: don't settle it; it goes on the owner's list with a recommended answer.
-5. **Log the run:** add one line to `update_docs.log` in the same PR: `- <date> · main <commit> · <PRs> · <counts changed / already true / needs the owner>`. The next run starts there.
-6. **Report** to whoever asked: what changed (document and the decision behind it), what was already true, and what needs the owner (protected files, clashes, missing decisions).
+1. **Start** at the last line of `update_docs.log` (date and main commit of the last run); with no log, the last phase exit, or a date from the orchestrator.
+2. **List** every decision since (running log, briefs, board answers) and every merged behaviour change (`git log --merges <start>..origin/main`, each PR body), one line each with its source.
+3. **Check** each against both sets: true, stale (say what), or missing. A doc saying what the code or a decision no longer supports is stale.
+4. **Fix** what is stale in plain words and the glossary's terms, without quoting the owner, editing only the wrong lines:
+   - other documents: one PR through `pr-gate` (evidence: each changed claim true at the head, every link resolves);
+   - `protected_files`: their own PR, each hunk listed, for the owner;
+   - a clash or an unmade decision: not settled; it goes on the owner's list with a recommended answer.
+5. **Log** one line in `update_docs.log` in the same PR: `- <date> · main <commit> · <PRs> · <changed / already true / needs the owner>`.
+6. **Report** what changed (document, decision), what was already true, and what needs the owner.

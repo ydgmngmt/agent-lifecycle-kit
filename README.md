@@ -42,7 +42,7 @@ The skills call the [mattpocock-skills](https://github.com/mattpocock/skills) se
 ## More
 
 - [Enforcement](docs/enforcement.md): the model, the modes, the step syntax, the commands
-- [Upgrading](docs/upgrading.md): 0.8 to 1.0, and 1.0 to 1.1
+- [Upgrading](docs/upgrading.md): 0.8 to 1.0, 1.0 to 1.1, and 1.1 to 1.2
 - [Machine-specific pieces](docs/machine.md)
 - [Proof (in progress)](docs/proof.md)
 - [The lifecycle skill](skills/lifecycle/SKILL.md): steps, roles and gates

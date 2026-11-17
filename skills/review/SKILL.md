@@ -1,17 +1,23 @@
 ---
 name: review
-description: Use when you are a gate session (spawned by `lc-gate run` for one `session` step of a PR or a phase exit) whose brief names a question file to answer, START and CANDIDATE commits, and a findings file.
+description: Use when you are a gate session (spawned by `lc-gate run` for one `session` step of a PR or a phase exit) whose brief names a question file, base and candidate commits, an evidence folder and a findings file.
 ---
 
 # Review: one gate session, one question file
 
-Your brief names everything: the question file, `START` (the base), `CANDIDATE` (the head), the evidence folder, your findings file and the exact `lc-gate record` line. You record only your own step, and only once the findings file has content.
+Read-only: fix nothing. Write only your findings file, and a live session's screenshots, traces and logs into the evidence folder. Don't read other gate sessions' findings.
 
-1. **Read the question file** in full. It says what to judge and which base skills to invoke for the vocabulary (`codebase-design`, `domain-modeling`) or the first pass (`code-review` against `START`, whose subagents may run). Rewrite any `code-review` output into the finding format.
-2. **Read the code at `CANDIDATE`** in your own detached worktree, or with `git show` and `git diff START CANDIDATE`; never check out in another session's worktree. Start from the evidence folder (the PR list, changed files, surface diff, baseline growth, quality lists). Change nothing, except where the question file says this review may edit docs. Don't read other gate sessions' findings.
-3. **Answer every question** for everything in scope: the whole diff for a PR, every file the phase touched for a phase. Prove a suspected sequence with `diagnosing-bugs` where you can; otherwise mark it needs-check.
-4. **Write the findings file**: each finding in [finding.md](../lifecycle/finding.md) with a `path:line`, then **Checked and sound** (one line per question or area, with the file that shows it) and **Not examined** (what, and why). A clean result is valid; invent nothing to fill the list. A live session's evidence (screenshots, traces, logs) goes in the evidence folder, named in the findings file.
-5. **Record:** run the brief's `lc-gate record` line as written (it carries the brief's `--candidate`): `fail` only when a finding is critical (a project invariant can be broken now) or the question file's own fail condition is met; otherwise `pass`, however many other findings there are. The findings file is the evidence. Every other finding is a follow-up the lead dispositions; a `fail` would block the exit for it.
-6. **Send** a critical finding (a project invariant can be broken now) to the lead at once, before the rest. Send the findings to whoever the brief names: the implementer and the orchestrator for a PR, the lead for a phase. Then stop.
+1. **Questions.** `lc-gate questions <question file>` lists them as Q1, Q2, …: the file's top-level numbered and bulleted items. Read the whole file; it names the inputs and the base skills to invoke (`codebase-design` or `domain-modeling` for vocabulary; `code-review` against the base as a first pass, its output rewritten into the finding format).
+2. **Code** at the candidate, in your own detached worktree (`git worktree add --detach <dir> <candidate>`) or with `git show` and `git diff <base> <candidate>`; never another session's worktree. Start from the evidence folder. Scope: the whole diff, or every file the phase touched. Prove a suspected sequence with `diagnosing-bugs`, else mark it needs-check.
+3. **Answer per item.** The findings file opens with one row per question. A question with no row fails the step: `lc-gate record` refuses the file.
 
-Done when every question has a finding or a Checked-and-sound line, and the step is recorded.
+   | Q | Question | Applies | Checked | Verdict |
+   | --- | --- | --- | --- | --- |
+   | Q1 | Types at boundaries | yes | src/api/order.ts:42, src/db/order.ts:10 | must-fix: F1 |
+   | Q2 | Effects | no | the diff has no outside call | n/a |
+
+   Applies is yes or no. A yes names each `path:line` you read for it; a no says why. Verdict: `sound`, `comment`, `must-fix` (naming its findings) or `n/a`.
+4. **Severity.** An item tagged `(must-fix)` or `(comment)` carries its own. Otherwise a finding is must-fix when a project invariant can be broken now or the question file's fail condition is met, and comment when not. A defect is never "sound".
+5. **Findings** follow the table, each in [finding.md](../lifecycle/finding.md). Invent nothing; a clean result is valid.
+6. **Record** with the brief's line: `fail` when any row is must-fix, else `pass`, however many comments. A pass with a must-fix row is refused.
+7. **Send** a critical finding to the lead at once; the file to the implementer and orchestrator for a PR, the lead for a phase. Then stop.

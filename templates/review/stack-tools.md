@@ -1,14 +1,10 @@
 # Stack tools
 
-The tools the stack decisions chose, at the versions this repository installs, with their documentation and the functions to call (`docs.stack_tools`). Read it before writing a tool-fit plan: each plan line cites a function from here and the docs page it came from.
+The chosen tools at the versions this repository installs, with their docs and the functions to call (`docs.stack_tools`). Each tool-fit plan line cites a function from here and its docs page.
 
 ## Looking up documentation
 
-Each entry's **Look up** line is the route to the installed version's docs: a documentation lookup service's library id and version, else the project's `llms.txt`, else its versioned docs.
-
-- Look up before planning a mechanism, and before concluding a tool can't do something.
-- A query carries the library name and the API question only: no project, repository, customer or person name, internal path or pasted code.
-- When the lookup and the installed version disagree, the installed version's own docs win.
+Each **Look up** line routes to the installed version's docs: a documentation lookup service's library id and version, else the project's `llms.txt`, else its versioned docs. Look up before planning a mechanism and before concluding a tool can't do something. A query carries the library name and the API question only: no project, repository, customer or person name, internal path or pasted code. Where the lookup and the installed version disagree, the installed version's docs win.
 
 ## <Tool name>
 

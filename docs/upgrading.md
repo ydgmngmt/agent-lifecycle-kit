@@ -15,3 +15,10 @@ After either upgrade, rerun the `bootstrap` skill: it finds what is missing and 
 - **New keys:** `gate_pr_plan`, `ci.required_checks`, `pr_body` (`heading`, `if`, `shapes`), `paths.mechanism`, `docs.stack_decisions`, `docs.stack_tools`, `docs.stack_exceptions`. The modes accept `observe <n>`; a file still on `observe` or `enforce` behaves as before.
 - **CI:** the phase-record step runs through `.agents/ci/from-base.sh` (from `templates/ci/`), and the new `pr-body.yml` checks the PR body's record. Add both to `ci.required_checks`, then run `lc-gate protect`.
 - **Phase exit:** a `stack` step with `templates/review/stack-hunt.md`; the architecture question file leaves the hunt to it.
+
+## From 1.1 to 1.2
+
+- **Answer per item.** A gate session's findings file opens with one row per question (`| Q<n> | question | yes/no | path:line checked | sound/comment/must-fix/n/a |`); `lc-gate record` refuses a session's record without a row for each, and a pass with a must-fix row. `lc-gate questions <file>` lists a question file's questions: its top-level numbered and bulleted items, so keep anything else in a question file out of lists. Recopy the question files from `templates/review/`; the docs review no longer edits docs.
+- **Review checklist:** `templates/review/checklist.md`, each item tagged `(must-fix)` or `(comment)`, with the block asked on every diff.
+- **New keys:** `sessions.gate_model` and `sessions.gate_effort` (default `opus`, `xhigh`) for the sessions `lc-gate run` starts.
+- **Sessions don't wait silently:** `lc-spawn` answers Claude Code's folder-trust prompt inside the repository's worktrees or `handoff_dir` and names it otherwise; `lc-gate run` reports a started session with no activity for 60 seconds.

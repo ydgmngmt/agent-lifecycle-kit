@@ -1,6 +1,6 @@
 # Stack decisions
 
-Which tool owns which capability in this repository, and what the project's own code owns. The tool-fit plan, the tool-fit review and the stack hunt read it (`docs.stack_decisions`). It changes only in a pull request the owner reads (`protected_files`).
+Which tool owns which capability, and what the project's own code owns (`docs.stack_decisions`). The tool-fit plan and review and the stack hunt read it; it changes only in a PR the owner reads.
 
 One section per capability. Number them: plan lines and findings cite `§<n>`.
 

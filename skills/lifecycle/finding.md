@@ -15,7 +15,7 @@ Every review writes findings in this format: each gate session (`review`), and t
 - Confidence: confirmed (callers traced) | likely | needs-check (what wasn't verified)
 ```
 
-A reviewer's file holds its findings, then **Checked and sound** (one line per area, with the file that shows it) and **Not examined**. A clean result is valid. Every finding has a `path:line`. Give no general advice, and don't invent findings to fill the list.
+A gate session's file opens with one row per question of its question file (`review`: applies, the `path:line` it checked, the verdict), then its findings. A clean result is valid. Every finding has a `path:line`. Give no general advice, and don't invent findings to fill the list.
 
 **Dispositions**, set by the lead, who reads the cited lines of every finding:
 - **blocking:** a failed acceptance criterion. It goes back to implementation, and the phase doesn't exit until it passes.

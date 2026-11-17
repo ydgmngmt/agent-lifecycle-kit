@@ -20,6 +20,7 @@
 //                       what makes each gate step binding here, layer by layer, and whether each is on
 //   lc-gate protect [--yes]   branch protection on the default branch from ci.required_checks
 //                       (gate/enforcement.mjs)
+//   lc-gate questions <file>  a question file's questions, Q1, Q2, …: the rows a session's findings answer
 //
 // gate_pr_mode and gate_pr_plan are off, observe, enforce, or `observe <n>`: enforce once <n> PRs have
 // merged with every record. The hook marks each merge it lets through: gates/pr/<id>/merged.json.
@@ -43,10 +44,13 @@
 // (the same with plan: true, sha the base, evidence a copy kept in evidence/), findings/,
 // evidence/, briefs/.
 // Who may record: a session lc-spawn started for a gate step has LC_GATE_STEP=<gate>/<id>/<step>; it
-// records only that step, only with findings/<step>.md present, and never N/A or a carry. Any other
+// records only that step, only with findings/<step>.md answering each question of its question file
+// in a row (questions, answerProblems), and never N/A or a carry. Any other
 // caller is the lead (`by` is LC_SESSION, else "lead"). Nobody records a command step's pass (the runner
 // does, from its exit), and only the spawned session records a session step's pass (the lead: N/A, carry).
+// A session step runs on sessions.gate_model and sessions.gate_effort (opus, xhigh), never the lead's.
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, posix, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -60,6 +64,7 @@ const PLANNED_KINDS = ['here', 'session']; // the kinds a session does, so the k
 export const KIT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const COMMAND_TIMEOUT = 3_600_000; // a command step that runs longer is recorded as FAIL
 const GH_TIMEOUT = 60_000;
+const IDLE = 60_000; // a started session whose window shows nothing new for this long is reported
 
 export class GateError extends Error {}
 export const die = (msg) => {
@@ -138,6 +143,59 @@ function planProblems(s, p) {
   if (p.status === 'na' && !p.reason?.trim()) return [`${s.id}: plan N/A without a reason`];
   if (p.status === 'na' && p.spawned) return [`${s.id}: plan N/A recorded by spawned session ${p.by}; only the lead may`];
   return [];
+}
+
+// --- answers per question ----------------------------------------------------------------------
+
+// A question file's questions: its top-level numbered and bulleted items, outside code fences, in
+// file order; they are Q1, Q2, … in the findings file.
+export function questions(text) {
+  const out = [];
+  let fence = false;
+  for (const line of text.split('\n')) {
+    if (/^(```|~~~)/.test(line)) fence = !fence;
+    const m = !fence && line.match(/^(?:\d+[.)]|[-*+])\s+(\S.*)$/);
+    if (m) out.push(m[1].trim());
+  }
+  return out;
+}
+
+const VERDICTS = ['sound', 'comment', 'must-fix', 'n/a'];
+// A findings file's rows `| Q<n> | question | applies | checked | verdict |`, by n, as cells.
+function answerRows(findings) {
+  const rows = new Map();
+  for (const line of findings.split('\n').map((l) => l.trim())) {
+    const c = line.replace(/^\||\|$/g, '').split('|').map((x) => x.trim());
+    const n = line.startsWith('|') && c[0].match(/^Q(\d+)$/i)?.[1];
+    if (n) rows.set(Number(n), c);
+  }
+  return rows;
+}
+// What is wrong with a findings file's rows for these questions, one line each: a question with no
+// row, applies not yes or no, a yes with no path:line it checked, a no with no reason, an unknown verdict.
+export function answerProblems(qs, findings) {
+  const rows = answerRows(findings);
+  return qs.flatMap((q, i) => {
+    const id = `Q${i + 1} (${q.replace(/\*\*/g, '').slice(0, 50)})`;
+    const c = rows.get(i + 1);
+    if (!c) return [`${id}: no row`];
+    if (c.length < 5) return [`${id}: a row is | Q${i + 1} | question | applies | checked | verdict |`];
+    const [, , applies, checked, verdict] = c;
+    if (!/^(yes|no)\b/i.test(applies)) return [`${id}: applies is yes or no, not "${applies}"`];
+    if (/^yes/i.test(applies) && !/[\w.-]+:\d+/.test(checked)) return [`${id}: applies, but names no path:line it checked`];
+    if (!checked) return [`${id}: says nothing of why it does not apply`];
+    if (!VERDICTS.some((v) => verdict.toLowerCase().startsWith(v))) return [`${id}: verdict is ${VERDICTS.join(', ')}; not "${verdict}"`];
+    return [];
+  });
+}
+
+// A session step's question file, as the repository has it, else at the candidate.
+function questionFile(g, s, sha) {
+  const path = resolve(g.cfg.repo, s.arg);
+  if (existsSync(path)) return readFileSync(path, 'utf8');
+  const r = exec('git', ['-C', g.cfg.repo, 'show', `${sha}:${s.arg}`], { ok: true });
+  if (r.status) die(`question file ${s.arg} of step ${s.id} is not in ${g.cfg.repo} nor at ${sha.slice(0, 12)}`);
+  return r.stdout;
 }
 
 // The PR gate's rule: a record made at `sha` holds for head `head` when sha is the head, or an
@@ -225,7 +283,16 @@ function record(repo, [gate, id, step, status, planStatus], flags) {
     if (own !== `${gate}/${id}/${step}`) die(`this session is step ${own}; it may record only that step`);
     if (status === 'na') die('a spawned session may not record N/A; only the lead may');
     if (flags.carry) die('a spawned session may not carry a record; only the lead may');
-    if (!nonEmpty(join(g.dir, 'findings', `${step}.md`))) die(`write findings/${step}.md in ${g.dir} first`);
+    const findings = join(g.dir, 'findings', `${step}.md`);
+    if (!nonEmpty(findings)) die(`write findings/${step}.md in ${g.dir} first`);
+    if (s.kind === 'session') {
+      const text = readFileSync(findings, 'utf8');
+      const qs = questions(questionFile(g, s, sha));
+      const problems = answerProblems(qs, text);
+      if (problems.length) die(`${findings} answers each question of ${s.arg} in a row (the review skill):\n  ${problems.join('\n  ')}`);
+      const mustFix = [...answerRows(text)].filter(([n, c]) => n <= qs.length && /^must-fix/i.test(c[4])).map(([n]) => `Q${n}`);
+      if (status === 'pass' && mustFix.length) die(`${mustFix.join(', ')} ${mustFix.length > 1 ? 'are' : 'is'} must-fix: record fail`);
+    }
   }
   const old = g.records[step];
   let evidence = flags.evidence ?? '';
@@ -427,14 +494,38 @@ async function run(repo, [gate, idArg], flags) {
   return 0;
 }
 
-// Whether lc-spawn's tmux session has a window of this name.
+// The id of lc-spawn's tmux window of this name, else null.
 function liveWindow(cfg, name) {
   try {
-    const r = exec('tmux', ['list-windows', '-t', cfg.tmuxSession || 'agents', '-F', '#W'], { ok: true, timeout: 10_000 });
-    return r.status === 0 && r.stdout.split('\n').includes(name);
+    const r = exec('tmux', ['list-windows', '-t', cfg.tmuxSession || 'agents', '-F', '#{window_id}\t#W'], { ok: true, timeout: 10_000 });
+    return r.status === 0 ? (r.stdout.split('\n').map((l) => l.split('\t')).find((w) => w[1] === name)?.[0] ?? null) : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+// A started session's activity: its window's text changing. briefs/<step>.seen.json keeps the last
+// look; unchanged for IDLE, the session is reported with the window's last line (a prompt it waits on).
+function idleNote(ctx, s, window) {
+  let pane;
+  try {
+    const r = exec('tmux', ['capture-pane', '-p', '-t', window], { ok: true, timeout: 10_000 });
+    if (r.status) return '';
+    pane = r.stdout;
+  } catch {
+    return '';
+  }
+  const file = join(ctx.dir, 'briefs', `${s.id}.seen.json`);
+  const hash = createHash('sha1').update(pane).digest('hex');
+  const seen = readJson(file, null);
+  if (seen?.hash !== hash) {
+    writeJson(file, { hash, at: Date.now() });
+    return '';
+  }
+  const idle = Date.now() - seen.at;
+  if (idle < IDLE) return '';
+  const last = pane.split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? '(nothing)';
+  return `shows no activity for ${Math.round(idle / 1000)}s; its window shows: ${last.slice(0, 120)}`;
 }
 
 function say(ctx, s, text) {
@@ -508,7 +599,11 @@ const STEP = {
     const name = `gate-${ctx.id}-${s.id}`.replace(/[^\w.-]/g, '-');
     const brief = join(ctx.dir, 'briefs', `${s.id}-${ctx.sha.slice(0, 12)}.md`);
     // One session per step at a time: a live one (for this candidate or an earlier one) is waited for.
-    if (liveWindow(ctx.cfg, name)) return say(ctx, s, `session ${name} is running; waiting for its record (lc-close ${name} to stop it)`);
+    const window = liveWindow(ctx.cfg, name);
+    if (window) {
+      const idle = idleNote(ctx, s, window);
+      return say(ctx, s, `session ${name} is running; waiting for its record (lc-close ${name} to stop it)${idle && `\n    ${name} ${idle}`}`);
+    }
     if (existsSync(brief)) return say(ctx, s, `session ${name} ended without a record; start it again with --rerun ${s.id}`);
     const findings = join(ctx.dir, 'findings', `${s.id}.md`);
     mkdirSync(dirname(findings), { recursive: true });
@@ -517,13 +612,21 @@ const STEP = {
     if (existsSync(findings)) renameSync(findings, join(ctx.dir, 'findings', `${s.id}.before-${ctx.sha.slice(0, 12)}.md`));
     const values = { gate: ctx.gate, id: ctx.id, step: s.id, session: name, question: s.arg, base: ctx.base, candidate: ctx.sha, evidence: join(ctx.dir, 'evidence'), findings };
     writeFileSync(brief, readFileSync(join(KIT, 'templates/gate-brief.md'), 'utf8').replace(/\{\{(\w+)\}\}/g, (_, k) => values[k]));
+    // The model floor: a gate session runs on the gate's model and effort, never on the lead's.
+    const conf = ctx.cfg.conf;
+    const env = { ...process.env, LC_GATE_STEP: `${ctx.gate}/${ctx.id}/${s.id}`, LC_MODEL: conf['sessions.gate_model'] || 'opus', LC_EFFORT: conf['sessions.gate_effort'] || 'xhigh' };
+    let out;
     try {
-      exec(join(KIT, 'bin/lc-spawn'), [name, ctx.repo, brief], { cwd: ctx.repo, timeout: 30_000, env: { ...process.env, LC_GATE_STEP: `${ctx.gate}/${ctx.id}/${s.id}` } });
+      out = exec(join(KIT, 'bin/lc-spawn'), [name, ctx.repo, brief], { cwd: ctx.repo, timeout: 60_000, env }).stdout;
     } catch (err) {
       unlinkSync(brief); // the brief marks a started session; the next run tries again
       throw err;
     }
-    return say(ctx, s, `started session ${name}; brief ${brief}`);
+    // The window as it is now, so the next run sees whether anything changed.
+    const started = liveWindow(ctx.cfg, name);
+    if (started) idleNote(ctx, s, started);
+    const said = out.split('\n').filter((l) => l.startsWith('lc-spawn:')).map((l) => `\n    ${l}`).join('');
+    return say(ctx, s, `started session ${name} on ${env.LC_MODEL}, effort ${env.LC_EFFORT}; brief ${brief}${said}`);
   },
 
   here(ctx, s) {
@@ -1083,6 +1186,14 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
   return 0;
 }
 
+// `lc-gate questions <file>`: the rows a session's findings file answers.
+function listQuestions(file, cwd) {
+  if (!file) die('usage: lc-gate questions <question file>');
+  const qs = questions(readFileSync(resolve(cwd, file), 'utf8'));
+  if (!qs.length) die(`${file} has no numbered or bulleted item`);
+  qs.forEach((q, i) => console.log(`Q${i + 1} ${q}`));
+}
+
 // --- main --------------------------------------------------------------------------------------
 
 const BOOLEAN = new Set(['carry', 'write', 'trailer', 'staged', 'files', 'strict', 'md', 'yes']);
@@ -1103,8 +1214,8 @@ export async function main(argv, cwd = process.cwd()) {
   const [cmd, ...rest] = argv;
   const repo = exec('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { ok: true }).stdout.trim() || cwd;
   const { pos, flags } = parseArgs(rest);
-  const commands = { run, record, status, hook, enforcement, protect, 'plan-check': (r, p, f) => planCheck(r, p, f, cwd), check: (r, p, f) => (f.diff ? checkPhaseDiff(r, f.diff, p[1]) : checkGate(r, p, f)) };
-  if (!commands[cmd]) die(`usage: lc-gate run|record|status|check|plan-check|hook|enforcement|protect …; see the top of gate/gate.mjs`);
+  const commands = { run, record, status, hook, enforcement, protect, questions: (r, p) => listQuestions(p[0], cwd), 'plan-check': (r, p, f) => planCheck(r, p, f, cwd), check: (r, p, f) => (f.diff ? checkPhaseDiff(r, f.diff, p[1]) : checkGate(r, p, f)) };
+  if (!commands[cmd]) die(`usage: lc-gate run|record|status|check|questions|plan-check|hook|enforcement|protect …; see the top of gate/gate.mjs`);
   return (await commands[cmd](repo, pos, flags)) ?? 0;
 }
 

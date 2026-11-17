@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { check, parseSteps, prCurrent } from './gate.mjs';
+import { answerProblems, check, parseSteps, prCurrent, questions } from './gate.mjs';
 import { parseProject } from '../board/config.mjs';
 
 const A = 'a'.repeat(40);
@@ -108,7 +108,8 @@ test("a spawned session's record names the candidate it was briefed on", () => {
   const s = { LC_SESSION: 'gate-x-review', LC_GATE_STEP: 'phase/x/review' };
   assert.equal(lc({}, 'record', 'phase', 'x', 'review', 'na', '--reason', 'seed', '--candidate', 'HEAD').status, 0);
   mkdirSync(`${git('pwd')}/state/gates/phase/x/findings`, { recursive: true });
-  writeFileSync(`${git('pwd')}/state/gates/phase/x/findings/review.md`, 'No findings.');
+  writeFileSync(`${git('pwd')}/q.md`, '1. Is it right?\n');
+  writeFileSync(`${git('pwd')}/state/gates/phase/x/findings/review.md`, '| Q1 | Is it right? | yes | a.js:1 | sound |\n');
   assert.match(lc(s, 'record', 'phase', 'x', 'review', 'pass', '--evidence', `${git('pwd')}/state/gates/phase/x/findings/review.md`).stderr, /--candidate/);
   assert.equal(lc(s, 'record', 'phase', 'x', 'review', 'pass', '--evidence', `${git('pwd')}/state/gates/phase/x/findings/review.md`, '--candidate', a).status, 0);
   assert.match(lc({}, 'check', 'phase', 'x').stderr, /review: recorded for/);
@@ -332,7 +333,8 @@ test("a session step's pass comes only from the session started for it", () => {
   const { repo, lc } = project('handoff_dir: $STATE\ngate_phase:\n  review: session q.md\n');
   const findings = join(repo, 'state/gates/phase/x/findings/review.md');
   mkdirSync(join(findings, '..'), { recursive: true });
-  writeFileSync(findings, 'No findings.');
+  writeFileSync(join(repo, 'q.md'), '1. Is it right?\n');
+  writeFileSync(findings, '| Q1 | Is it right? | yes | a.js:1 | sound |\n');
   const lead = lc({}, 'record', 'phase', 'x', 'review', 'pass', '--evidence', findings, '--candidate', 'HEAD');
   assert.equal(lead.status, 1);
   assert.match(lead.stderr, /session step/);
@@ -362,4 +364,42 @@ test('an after-gate command step can be planned: the author plans first, the pip
   assert.deepEqual(fit, { id: 'fit', kind: 'command', arg: 'check-review', if: 'mech', plan: true, afterGate: true });
   // Without after-gate, a command's trailing "plan" stays part of the command, as it always was.
   assert.deepEqual(tf, { id: 'tf', kind: 'command', arg: 'terraform plan', if: null });
+});
+
+// A review session answers per item: one findings row per question of its question file.
+const QFILE = '# Review: x\n\nIntro text.\n\n1. **Types.** Are boundaries checked?\n2. **Errors.** Is an error swallowed?\n\n## Asked on every diff\n\n- Who owns each new dependency?\n  - an indented note, not a question\n\n```\n- not a question either\n```\n';
+const row = (n, applies, checked, verdict) => `| Q${n} | q | ${applies} | ${checked} | ${verdict} |`;
+
+test("a question file's questions are its top-level numbered and bulleted items", () => {
+  assert.deepEqual(questions(QFILE), ['**Types.** Are boundaries checked?', '**Errors.** Is an error swallowed?', 'Who owns each new dependency?']);
+});
+
+test('a findings file answers every question, with what it checked', () => {
+  const qs = questions(QFILE);
+  const full = [row(1, 'yes', 'src/a.js:3', 'sound'), row(2, 'yes', 'src/b.js:9', 'comment'), row(3, 'no', 'no new dependency', 'n/a')].join('\n');
+  assert.deepEqual(answerProblems(qs, `| Q | Question | Applies | Checked | Verdict |\n| --- | --- | --- | --- | --- |\n${full}\n`), []);
+  assert.match(answerProblems(qs, row(1, 'yes', 'src/a.js:3', 'sound')).join('\n'), /Q2 .*no row[^]*Q3 .*no row/);
+  assert.match(answerProblems(qs, full.replace('src/b.js:9', 'looked at it')).join('\n'), /Q2.*path:line/);
+  assert.match(answerProblems(qs, full.replace('| no |', '| maybe |')).join('\n'), /Q3.*yes or no/);
+  assert.match(answerProblems(qs, full.replace('comment', 'fine')).join('\n'), /Q2.*verdict/);
+});
+
+test("a session's record is refused without a row per question, and a pass with a must-fix row", () => {
+  const { repo, lc } = project('handoff_dir: $STATE\ngate_phase:\n  review: session q.md\n');
+  writeFileSync(join(repo, 'q.md'), QFILE);
+  const findings = join(repo, 'state/gates/phase/x/findings/review.md');
+  mkdirSync(join(findings, '..'), { recursive: true });
+  const own = { LC_SESSION: 'gate-x-review', LC_GATE_STEP: 'phase/x/review' };
+  const rec = (status) => lc(own, 'record', 'phase', 'x', 'review', status, '--evidence', findings, '--candidate', 'HEAD');
+  writeFileSync(findings, 'No findings.');
+  const none = rec('pass');
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /Q1 .*no row/);
+  writeFileSync(findings, [row(1, 'yes', 'src/a.js:3', 'must-fix'), row(2, 'yes', 'src/b.js:9', 'sound')].join('\n'));
+  assert.match(rec('fail').stderr, /Q3 .*no row/);
+  writeFileSync(findings, [row(1, 'yes', 'src/a.js:3', 'must-fix'), row(2, 'yes', 'src/b.js:9', 'sound'), row(3, 'no', 'no new dependency', 'n/a')].join('\n'));
+  assert.match(rec('pass').stderr, /Q1 is must-fix/);
+  assert.equal(rec('fail').status, 0);
+  const listed = lc({}, 'questions', 'q.md');
+  assert.match(listed.stdout, /^Q1 \*\*Types\.\*\*.*\nQ2 .*\nQ3 Who owns/);
 });

@@ -5,20 +5,16 @@ description: Use when you are a session given a brief to build one pull request,
 
 # Implementer
 
-1. **Read** the brief in full, then the project files it names. Send the orchestrator a finding first only if the brief clashes with the docs; give both sides with `path:line`, and carry on with what doesn't depend on the answer.
-2. **Isolate and coordinate.** Work in your own worktree and branch. Before you edit a file the brief names as shared, agree with the peer session that also edits it.
-3. **Plan from the tools.** Where `gate_pr:` has a step ending in `plan`, your first act is the plan, before any code: from the brief's **Stack fit** and the tools' docs, one line per piece of work, "I will call `<function>` (`<docs page>`) for `<what>`"; your own code only where no tool covers it, with the reason. Record it with `lc-gate record pr <branch> <step> plan --evidence <file>` before the first commit, and complete each line with `file:line` once the code is written (`pr-gate`).
-4. **Reuse first.** Find each concept's owner in `docs.code_map` and extend it. Invoke `codebase-design` when you add a module or interface.
-5. **Smallest diff** that meets the brief. Touch only what it needs, match the existing style, and remove what your change orphans.
-6. **Bugs:** invoke `diagnosing-bugs` and reproduce the bug first. **Tests:** keep behaviour regressions at the lowest reliable level, and use focused lower-level tests for core and security invariants (`docs.testing`). Invoke `tdd` for a test-first slice and record the seam and what it catches in the report.
-7. **Subagents** only for independent parts (separate files, a mechanical move, a codebase lookup), at most `sessions.max_subagents` at a time. You check each result yourself. Subagents never gate, push or use a lane.
-8. **Docs.** Update the docs your change makes stale in the same PR: stories, journeys, roadmap and glossary (`domain-modeling` for the terms). If you are asked to "update the docs", that is the `update-docs` sweep, not a note about your change.
-9. **Before each push** (the commit check):
-   - Follow the limits in `machine` before a heavy command.
-   - Run `profiles.commit`: typecheck and the targeted behaviour tests covering the changed files, plus any you name.
-   - A failure is yours to fix, even in code you didn't change; if it is not small, file an issue and say so in the report. A rebase without conflicts needs no rerun.
-   - Done when `profiles.commit` exits 0 on the head you push.
-10. **PR gate.** Run `lc-gate run pr <branch>` and follow `pr-gate` until `lc-gate check pr <branch>` holds.
-11. **Report** ([report.md](../lifecycle/report.md)) to the orchestrator, and stay available for fixes.
+1. **Read** the brief in full, then the files it names. If it clashes with the docs, send the orchestrator both sides with `path:line` and carry on with what doesn't depend on the answer.
+2. **Isolate.** Your own worktree and branch. Agree with the peer before editing a file the brief names as shared.
+3. **Plan first** where a `gate_pr:` step ends in `plan`: before any code, as `pr-gate` says ("Plan from the tools").
+4. **Reuse first.** Extend each concept's owner (`docs.code_map`). `codebase-design` when you add a module or interface.
+5. **Smallest diff** that meets the brief, in the existing style; remove what your change orphans.
+6. **Bugs:** `diagnosing-bugs`, reproduced first. **Tests:** regressions at the lowest reliable level, focused tests for core and security invariants (`docs.testing`); `tdd` for a test-first slice, with its seam and what it catches in the report.
+7. **Subagents** only for independent parts, at most `sessions.max_subagents` at a time; check each result yourself. They never gate, push or use a lane.
+8. **Docs** your change makes stale, in the same PR: stories, journeys, roadmap, glossary (`domain-modeling`). "Update the docs" is the `update-docs` sweep.
+9. **Before each push:** follow `machine` before a heavy command; run `profiles.commit` (typecheck and the tests covering the changed files) until it exits 0 on the head you push. A failure is yours, even in code you didn't change; if it is not small, file an issue and report it. A rebase without conflicts needs no rerun.
+10. **PR gate:** `lc-gate run pr <branch>` and `pr-gate` until `lc-gate check pr <branch>` holds.
+11. **Report** ([report.md](../lifecycle/report.md)) to the orchestrator; stay available for fixes.
 
-Peers: message other sessions directly about file ownership, lanes and review findings. Anything that changes scope, a product rule or the plan goes to the orchestrator.
+Message peers directly about files, lanes and findings; scope, product rules and the plan go to the orchestrator.

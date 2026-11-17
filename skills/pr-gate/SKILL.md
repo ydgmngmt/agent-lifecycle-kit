@@ -5,44 +5,43 @@ description: Use when a pull request's work is committed and must pass its gate 
 
 # PR gate
 
-The steps are the project's `gate_pr:` block; `paths:` says which files make a step with `if <key>` apply. Run `lc-gate run pr <branch>` (no id: the current branch) and rerun it after each step until `lc-gate check pr <branch>` holds. The runner runs `command` steps and spawns `session` steps; a `here` step is yours. You can't record a `command` step's pass (`lc-gate run pr <branch> --rerun <step>` runs it again) nor a `session` step's pass (only the session spawned for it can). Below is how to do the steps a project usually declares, and what a PR needs besides its records.
+The steps are the project's `gate_pr:` block; `paths:` says which files make an `if <key>` step apply. Run `lc-gate run pr <branch>` (no id: the current branch) after each step until `lc-gate check pr <branch>` holds. The runner runs `command` steps and spawns `session` steps; a `here` step is yours. Only the runner records a `command` step's pass (`--rerun <step>` runs it again), and only the session spawned for a `session` step records its pass.
 
 ## Plan from the tools
 
-Where a step line in `gate_pr:` ends in `plan` (say `tool-fit: session docs/review/tool-fit.md if mechanism plan`), the first act on the PR, before any code, is the plan. Read the project's list of chosen tools (`docs.stack_tools`, the brief's **Stack fit**), open their documentation, and write one line per piece of work in the shapes the step's question file accepts: "I will call `<function>` (`<docs page>`) for `<what>`". Only what no tool covers is your own code, with the reason. Record it before the first commit: `lc-gate record pr <branch> <step> plan --evidence <file>`; after the first commit it is refused. After coding, complete each line with the `file:line` of the call and copy the lines under the PR body's `pr_body.heading`, which CI's `pr-body` check reads. The step itself is recorded by someone else: for a `session` step, the session the runner starts checks your plan against the diff. A branch that had commits before the gate saw it gets `plan na --reason …` from the orchestrator. Under `gate_pr_plan: enforce` the hook refuses an edit or a commit of a file the step applies to until the plan is recorded, and refuses `git commit --no-verify`; write the plan outside the repository or under `.agents/`, which the check ignores.
+Where a `gate_pr:` step ends in `plan`, the plan comes before any code. From `docs.stack_tools`, the brief's **Stack fit** and each touched tool's docs (its **Look up** line), write one line per piece of work in the shapes the step's question file accepts: "I will call `<function>` (`<docs page>`) for `<what>`"; own code only where no tool covers it, with the reason. Write it outside the repository or under `.agents/`, and record it before the first commit: `lc-gate record pr <branch> <step> plan --evidence <file>` (refused after). Once coded, complete each line with the call's `file:line`, add a line for any mechanism the plan missed, and copy the lines under the PR body's `pr_body.heading` for CI's `pr-body` check. A branch with commits before the gate saw it gets `plan na --reason …` from the orchestrator. Under `gate_pr_plan: enforce` the hook refuses an edit or commit of a file the step covers until the plan is recorded, and refuses `git commit --no-verify`.
 
 ## Steps after the review pipeline
 
-A step line ending in `after-gate` (after `plan` when both are there; say `pipeline: command <script> after-gate`) holds only once the project's review pipeline has reviewed this head. `lc-gate check pr <branch>` and the hook at the gate start skip it, so once `check` holds, start the pipeline; `check` names what is left for the merge. After the pipeline, rerun `lc-gate run pr <branch>`: it walks those steps last. The hook at `gh pr merge` and `lc-gate status pr <branch> --trailer` require them.
+A step ending in `after-gate` holds only once the review pipeline has reviewed this head. `check` and the gate-start hook skip it: once `check` holds, start the pipeline, then rerun `lc-gate run pr <branch>`. The merge hook and `status --trailer` require it.
 
-## Recording a `here` step
+## A `here` step
 
-Write what you did and saw to `<handoff_dir>/gates/pr/<branch>/evidence/<step>.md`, then `lc-gate record pr <branch> <step> pass|fail --evidence <that file>`. A step that doesn't apply to this change still gets a record: tell the orchestrator, who records N/A with the reason. A new commit makes the records stale; rerun `lc-gate run pr` and redo what it lists.
+Write what you did and saw to `<handoff_dir>/gates/pr/<branch>/evidence/<step>.md`, then `lc-gate record pr <branch> <step> pass|fail --evidence <that file>`. A step that doesn't apply gets N/A with a reason from the orchestrator. A new commit makes records stale: rerun `lc-gate run pr` and redo what it lists.
 
 ## Self-review
 
-Your own check before the gate starts. As a `gate_pr` step it would be the author's word on the author's work, which `lc-gate enforcement` flags; the review that gates the merge is the pipeline's or a separate session's. Invoke `code-review` against the base, with the brief as the spec. Fix what it finds in scope; rewrite the rest into [finding.md](../lifecycle/finding.md) for the report. The evidence is the finding list and what you fixed.
+Your own check before the gate, never a gate step. `code-review` against the base, the brief as the spec. Fix what it finds in scope; rewrite the rest into [finding.md](../lifecycle/finding.md) for the report.
 
 ## Live check
 
-Exercise the changed flow once through the real thing. Where the project has its own verify skill (named in the step's argument or in `docs.testing`), invoke it: it knows how to start the stack, sign in and drive it.
+Exercise the changed flow once through the real thing, with the project's verify skill where it has one (the step's argument or `docs.testing`).
 
-1. Bring the stack up on your lane only (`lanes.up`). Without a lane, ask the orchestrator for one; never start a stack without one.
-2. Drive the real flow: for UI, sign in, navigate and use the ordinary controls (`browser`); for a backend flow, the public API, CLI or event entry, followed through workers and storage. No mocked responses, no injected state.
-3. Verify the observable result, that it persists after a reload, and the next dependent action. For a bug fix, the path that failed.
-4. When it fails, invoke `diagnosing-bugs` and build a red loop on this flow before you change code.
-5. Evidence: PASS / FAIL / BLOCKED / NOT TESTED with the commit, entry point, steps, result and elapsed time. Take the stack down and say the lane is free.
+1. Bring the stack up on your lane only (`lanes.up`); without a lane, ask the orchestrator.
+2. Drive the real flow: for UI, sign in and use the ordinary controls (`browser`); for a backend flow, the public API, CLI or event entry, through workers and storage. No mocked responses, no injected state.
+3. Verify the result, that it persists after a reload, and the next dependent action; for a bug fix, the path that failed. On failure, `diagnosing-bugs` with a red loop on this flow before changing code.
+4. Evidence: PASS / FAIL / BLOCKED / NOT TESTED with the commit, entry point, steps, result and time. Take the stack down; say the lane is free.
 
-A change with no flow to show still needs evidence: for docs, every link resolves and each claim is true at the head; for tooling, CI or baselines, the check's output before and after; for code no one can reach yet, the spec that drives it, red before and green after.
+With no flow to show: for docs, every link resolves and each claim is true at the head; for tooling, CI or baselines, the output before and after; for unreachable code, its spec red before and green after.
 
 ## Reviewer (sensitive path)
 
-A `session` step: the runner spawns an independent session that follows `review` with the project's checklist, never the implementer. Its findings go to the implementer, with a copy to the orchestrator. It records `fail` on a critical finding or a must-fix finding still open at the head. Commits after its PASS make that record stale, and the runner doesn't restart the review on its own: the orchestrator either reruns it on the new head (`lc-close <name>` on the old reviewer, then `lc-gate run pr <branch> --rerun <step>`: a new session that reads the commits since the last record), or carries the record with a reason.
+A `session` step with the project's checklist (`docs.review_checklist`), never the implementer. It records `fail` on a must-fix finding. Commits after its pass make it stale: the orchestrator reruns it (`lc-close <name>`, then `lc-gate run pr <branch> --rerun <step>`) or carries it with a reason.
 
-## What the PR needs besides its records
+## Besides the records
 
 - **Protected files** (`owner_approval`): their own PR, each hunk listed in the body; the owner approves before the merge.
 - **Sensitive changes:** targeted tests for the affected invariants, red on the base and green on the head.
-- **PR body:** invoke `pr`. Under Evidence, the live-check result and the red-then-green proof of each new test. Paste `lc-gate status pr <branch> --trailer` where the project asks for the stamp.
-- **CI:** run `gate.run` with the intent in a file, then wait for the checks `ci.pr_checks` lists. An empty check list is not success.
-- **Merge candidate:** the required checks pass with the PR applied to the current main (`merge.candidate`). The orchestrator merges.
+- **PR body:** invoke `pr`. Under Evidence, the live-check result and each new test's red-then-green proof; `lc-gate status pr <branch> --trailer` where the project asks.
+- **CI:** run `gate.run` with the intent in a file, then wait for `ci.pr_checks`. An empty list is not success.
+- **Merge candidate:** the required checks pass with the PR applied to current main (`merge.candidate`). The orchestrator merges.
