@@ -3,6 +3,7 @@
 # Usage: lc-spawn <name> <workdir> <brief-file>
 # Settings come from the `sessions:` block of <workdir>'s .agents/project.yaml;
 # LC_TMUX_SESSION, LC_AGENT_CMD, LC_MODEL, LC_EFFORT, LC_AGENT_FLAGS override them.
+# The session gets LC_SESSION=<name>, and LC_GATE_STEP when lc-spawn is given one (lc-gate run).
 set -euo pipefail
 [[ $# -eq 3 ]] || { echo "usage: lc-spawn <name> <workdir> <brief-file>" >&2; exit 2; }
 name="$1"; dir="$2"; brief="$3"
@@ -25,6 +26,8 @@ case "$agent" in
     cmd="codex $flags ${model:+--model $model} $(printf '%q' "$prompt")" ;;
   *) echo "lc-spawn: agent_cmd must be claude or codex, not $agent" >&2; exit 1 ;;
 esac
+# The session knows its name, and a gate step's session its step (lc-gate record reads both).
+cmd="LC_SESSION=$(printf '%q' "$name")${LC_GATE_STEP:+ LC_GATE_STEP=$(printf '%q' "$LC_GATE_STEP")} $cmd"
 
 # The board shows the brief's title as the session's note and finds its PR from the branch.
 board=$(lc_board_dir "$dir")
