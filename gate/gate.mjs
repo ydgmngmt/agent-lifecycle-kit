@@ -26,16 +26,19 @@
 // The PR gate's id is its branch (branchId). The phase gate needs --base on its first run.
 //
 // A gate is `phase` or `pr`; its steps are the block `gate_<gate>:` of the project file, one line
-// each: `<step>: <kind> <argument> [if <paths key>] [plan]`, kind command, workflow, session, here or owner.
-// A here or session step ending in `plan` also needs records/<step>.plan.json, made before the first
-// commit of the work (an N/A plan, from the lead, when the work had commits before the gate saw it).
+// each: `<step>: <kind> <argument> [if <paths key>] [plan] [after-gate]`, kind command, workflow, session,
+// here or owner. A here or session step with `plan` also needs records/<step>.plan.json, made before
+// the first commit of the work (an N/A plan, from the lead, when the work had commits before the gate
+// saw it). An `after-gate` step is one only the review pipeline's result can satisfy: `check` and the
+// hook at the gate start skip it, the hook at merge and `status` require it, and `run` walks it last.
 // State: <handoff_dir>/gates/<gate>/<id>/ (else <repo>/.agents/gates/…): gate.json (candidate, base),
 // records/<step>.json (step, status, sha, evidence, by, at, reason; carried, spawned), records/<step>.plan.json
 // (the same with plan: true, sha the base, evidence a copy kept in evidence/), findings/,
 // evidence/, briefs/.
 // Who may record: a session lc-spawn started for a gate step has LC_GATE_STEP=<gate>/<id>/<step>; it
 // records only that step, only with findings/<step>.md present, and never N/A or a carry. Any other
-// caller is the lead (`by` is LC_SESSION, else "lead").
+// caller is the lead (`by` is LC_SESSION, else "lead"). Nobody records a command step's pass (the runner
+// does, from its exit), and only the spawned session records a session step's pass (the lead: N/A, carry).
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, posix, relative, resolve } from 'node:path';
@@ -77,14 +80,18 @@ export function parseSteps(conf, gate) {
   for (const [key, value] of Object.entries(conf)) {
     if (!key.startsWith(prefix)) continue;
     const id = key.slice(prefix.length);
-    // A trailing `plan` marks a here or session step as planned; on another kind it stays part of the
-    // argument, as it always was.
-    const kind = value.match(/^\S+/)?.[0];
-    const plan = PLANNED_KINDS.includes(kind) && /\splan$/.test(value);
-    const m = (plan ? value.replace(/\s+plan$/, '') : value).match(/^(\S+)\s*(.*?)(?:\s+if\s+([\w-]+))?$/);
-    if (!m || !KINDS.includes(m[1])) die(`${prefix}${id}: "${value}" is not "<kind> <argument> [if <paths key>] [plan]" with kind ${KINDS.join(', ')}`);
+    // A trailing `after-gate` marks a step that only the review pipeline's result can satisfy: the gate
+    // start skips it, the merge requires it. A `plan` before it marks a here or session step as planned;
+    // on another kind it stays part of the argument, as it always was.
+    const afterGate = /\safter-gate$/.test(value);
+    let rest = afterGate ? value.replace(/\s+after-gate$/, '') : value;
+    const kind = rest.match(/^\S+/)?.[0];
+    const plan = PLANNED_KINDS.includes(kind) && /\splan$/.test(rest);
+    if (plan) rest = rest.replace(/\s+plan$/, '');
+    const m = rest.match(/^(\S+)\s*(.*?)(?:\s+if\s+([\w-]+))?$/);
+    if (!m || !KINDS.includes(m[1])) die(`${prefix}${id}: "${value}" is not "<kind> <argument> [if <paths key>] [plan] [after-gate]" with kind ${KINDS.join(', ')}`);
     if (m[3] && !conf[`paths.${m[3]}`]) die(`${prefix}${id}: "if ${m[3]}" names no paths.${m[3]}`);
-    steps.push({ id, kind: m[1], arg: m[2], if: m[3] ?? null, ...(plan ? { plan } : {}) });
+    steps.push({ id, kind: m[1], arg: m[2], if: m[3] ?? null, ...(plan ? { plan } : {}), ...(afterGate ? { afterGate } : {}) });
   }
   return steps;
 }
@@ -93,10 +100,12 @@ export function parseSteps(conf, gate) {
 
 // Problems with a gate's records for candidate `sha`, one line per step; none means the gate holds.
 // `records` maps a step id to its record; `current(recordSha)` says whether a record's commit
-// counts for the candidate (exact match, or the PR gate's update-branch rule, prCurrent).
-export function check(steps, records, sha, current = (s) => s === sha) {
+// counts for the candidate (exact match, or the PR gate's update-branch rule, prCurrent). `start`:
+// the check at the gate start, before the review pipeline ran, which skips the after-gate steps.
+export function check(steps, records, sha, current = (s) => s === sha, { start = false } = {}) {
   const problems = [];
   for (const s of steps) {
+    if (start && s.afterGate) continue;
     const r = records[s.id];
     const who = r?.spawned ? `spawned session ${r.by}` : '';
     if (!r) problems.push(`${s.id}: missing`);
@@ -211,17 +220,28 @@ function record(repo, [gate, id, step, status, planStatus], flags) {
   }
   const old = g.records[step];
   let evidence = flags.evidence ?? '';
+  // A command step's pass is its exit at the candidate, so only the runner records it (a carry would
+  // record a pass for a commit it never ran on). A session step's pass comes from the session the
+  // runner started for it; the lead carries an earlier one or records N/A.
+  const runnerPass = () => {
+    if (status !== 'pass') return;
+    const rerun = `lc-gate run ${gate} ${id} --rerun ${step}`;
+    if (s.kind === 'command') die(`${step} is a command step: only the runner records its pass, from its exit at the candidate. ${rerun} runs it`);
+    if (s.kind === 'session' && !own && !flags.carry) die(`${step} is a session step: its pass is recorded only by the session lc-gate run starts for it (${rerun}); the lead records N/A with --reason, or carries an earlier pass with --carry --reason`);
+  };
   if (flags.carry) {
     if (!old) die(`nothing to carry: ${step} has no record`);
     if (old.sha === sha) die(`${step} is already recorded for the candidate`);
     if (old.status === 'fail') die(`${step} is FAIL at ${old.sha.slice(0, 12)}: only a pass or N/A is carried; rerun the step`);
     if (status !== old.status) die(`a carry keeps the status: ${step} is ${label(old)}, not ${status}`);
+    runnerPass();
     if (evidence) die('a carry keeps the old evidence; drop --evidence');
     if (!reason) die('a carry needs --reason');
     evidence = old.evidence;
   } else if (status === 'na') {
     if (!reason) die('N/A needs --reason');
   } else {
+    runnerPass();
     if (!evidence) die(`${status} needs --evidence <path|url>`);
     if (!isUrl(evidence)) {
       evidence = resolve(evidence);
@@ -294,7 +314,7 @@ function status(repo, [gate, id], flags) {
   for (const s of g.steps) {
     const r = g.records[s.id];
     const stale = r && !current(r.sha) ? ' (stale)' : '';
-    rows.push([s.id, s.kind, label(r) + stale, r ? r.sha.slice(0, 12) : '', r?.by ?? '', [r?.evidence, r?.reason].filter(Boolean).join(' · ')]);
+    rows.push([s.id, s.afterGate ? `${s.kind} after-gate` : s.kind, label(r) + stale, r ? r.sha.slice(0, 12) : '', r?.by ?? '', [r?.evidence, r?.reason].filter(Boolean).join(' · ')]);
     const p = s.plan ? g.records[`${s.id}.plan`] : null;
     if (s.plan) rows.push([`${s.id} (plan)`, '', p ? `${label(p)} at base` : '-', p ? p.sha.slice(0, 12) : '', p?.by ?? '', [p?.evidence, p?.reason].filter(Boolean).join(' · ')]);
   }
@@ -307,12 +327,16 @@ function status(repo, [gate, id], flags) {
 function checkGate(repo, [gate, id], flags) {
   const g = load(repo, gate, id);
   const sha = candidateOf(g, flags);
-  const problems = check(g.steps, g.records, sha, currentFor(g, gate, sha));
+  // The check before the review pipeline starts: the after-gate steps come after it (status and the
+  // merge require them).
+  const current = currentFor(g, gate, sha);
+  const problems = check(g.steps, g.records, sha, current, { start: true });
   if (problems.length) {
     console.error(`lc-gate: ${gate} ${id} at ${sha.slice(0, 12)} does not hold:\n  ${problems.join('\n  ')}`);
     return 1;
   }
-  console.log(`${gate} ${id} holds at ${sha}`);
+  const after = check(g.steps, g.records, sha, current);
+  console.log(`${gate} ${id} holds at ${sha}${after.length ? `, up to the review pipeline; after it, the merge also needs:\n  ${after.join('\n  ')}` : ''}`);
   return 0;
 }
 
@@ -354,7 +378,8 @@ async function run(repo, [gate, idArg], flags) {
   for (const x of rerun) if (!g.steps.some((s) => s.id === x)) die(`--rerun ${x}: no such step`);
   let above = true; // every step above has a record for the candidate
   let commits;
-  for (const s of g.steps) {
+  // The after-gate steps last: they come after the review pipeline, which starts once the rest holds.
+  for (const s of [...g.steps.filter((x) => !x.afterGate), ...g.steps.filter((x) => x.afterGate)]) {
     let r = g.records[s.id] && current(g.records[s.id].sha) && !rerun.has(s.id) ? g.records[s.id] : null;
     const old = g.records[s.id];
     if (s.plan && !g.records[`${s.id}.plan`] && r?.status !== 'na') {
@@ -363,7 +388,8 @@ async function run(repo, [gate, idArg], flags) {
         ? `no plan recorded before the work, and the work has ${commits} commit(s) already: the lead records lc-gate record ${gate} ${id} ${s.id} plan na --reason …`
         : `plan now, before the first commit: from the project's chosen tools and their docs, one line per piece of work, "I will call <function> (<docs page>) for <what>"; then lc-gate record ${gate} ${id} ${s.id} plan --evidence <file>`);
     }
-    const waits = ['command', 'here', 'owner'].includes(s.kind) && !above;
+    const waits = (s.afterGate || ['command', 'here', 'owner'].includes(s.kind)) && !above;
+    if (s.afterGate && !r) say(ctx, s, 'after the pipeline: start the review pipeline once the steps above hold; its result for this head is what this step records');
     if (rerun.has(s.id) && s.kind === 'session') rmSync(join(g.dir, 'briefs', `${s.id}-${sha.slice(0, 12)}.md`), { force: true });
     if (r && !(s.kind === 'command' && r.status === 'fail' && !waits)) say(ctx, s, `${label(r)}, by ${r.by}${r.reason ? ` (${r.reason})` : ''}`);
     else if (!r && s.if && !touches(s.if)) r = put(ctx, s, 'na', '', `no file changed between ${base.slice(0, 12)} and ${sha.slice(0, 12)} matches paths.${s.if}`, 'lc-gate');
@@ -381,8 +407,14 @@ async function run(repo, [gate, idArg], flags) {
     }
     above &&= Boolean(r);
   }
-  const problems = check(g.steps, readRecords(g.dir), sha, current);
-  console.log(problems.length ? `${problems.length} step(s) not done; rerun lc-gate run to advance` : `every step holds: lc-gate status ${gate} ${id}${gate === 'phase' ? ' --write' : ' --trailer'}`);
+  const now = readRecords(g.dir);
+  const problems = check(g.steps, now, sha, current);
+  const before = check(g.steps, now, sha, current, { start: true });
+  console.log(
+    !problems.length ? `every step holds: lc-gate status ${gate} ${id}${gate === 'phase' ? ' --write' : ' --trailer'}`
+    : !before.length ? `every step before the review pipeline holds: start it, then rerun lc-gate run for the after-gate step(s)`
+    : `${problems.length} step(s) not done; rerun lc-gate run to advance`,
+  );
   return 0;
 }
 
@@ -975,7 +1007,8 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
         [branch, head] = [git(p.cwd, 'rev-parse', '--abbrev-ref', 'HEAD'), git(p.cwd, 'rev-parse', 'HEAD')];
       }
       const id = branchId(branch);
-      const missing = check(steps, readRecords(gateDir(cfg, 'pr', id)), head, prCurrent(repo, head));
+      // At the gate start the after-gate steps can't hold yet: the pipeline being started satisfies them.
+      const missing = check(steps, readRecords(gateDir(cfg, 'pr', id)), head, prCurrent(repo, head), { start: p.point === 'gate start' });
       if (!missing.length) continue;
       const what = `the PR gate for ${branch} at ${head.slice(0, 12)} does not hold:\n  ${missing.join('\n  ')}\nRun lc-gate run pr ${id}, then record each step.`;
       note({ mode, branch, head, missing, ...(mode === 'enforce' ? { refused: true } : {}) });

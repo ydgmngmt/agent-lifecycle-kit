@@ -69,7 +69,7 @@ gate:
   run: <gate command, intent from a file>
 
 # The gates' steps (lc-gate). One line per step, in the order they run:
-#   <step>: <kind> <argument> [if <paths key>]
+#   <step>: <kind> <argument> [if <paths key>] [plan] [after-gate]
 # kind: command (the runner runs it) · workflow (a CI workflow file, dispatched with -f candidate=<sha>)
 #       · session (a spawned review session; the argument is its question file) · here (done by the
 #       session running the gate; the argument says what) · owner (a board question).
@@ -88,6 +88,7 @@ gate_pr:
   live-check: here the project's verify skill on the changed flow if flow
   reviewer: session docs/review-checklist.md if sensitive
   # stack-fit: here docs/review/stack-fit.md if flow plan   # `plan`: a plan recorded before the first commit (lc-gate record … plan)
+  # pipeline: command <script that passes once the review pipeline reviewed this head> after-gate   # skipped at the gate start, required at merge
 
 gate_phase:
   freeze: command <script that writes the evidence folder: PR list, files, surface diff, baseline growth, quality lists>

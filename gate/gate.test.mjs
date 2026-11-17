@@ -1,4 +1,4 @@
-// The check's invariants. Run: node --test gate/
+// The check's invariants. Run: node --test gate/*.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -284,6 +284,62 @@ test('a commit is checked on its files, and --no-verify is refused only where a 
   writeFileSync(join(p.repo, '.agents/project.yaml'), PLANNED.replace('$STATE', `${p.repo}/state`).replace(' plan\n', '\n') + 'gate_pr_plan: enforce\n');
   p.git('git checkout -q -b other && mkdir -p src && echo w > src/b.js && git add src/b.js');
   assert.equal(commit('git commit --no-verify -m no-planned-step').status, 0);
+});
+
+// A step only an external review pipeline's result for the head can satisfy: `after-gate`.
+const AFTER = 'handoff_dir: $STATE\ngate_pr_mode: enforce\ngate_pr:\n  fit: here docs/fit.md\n  pipeline: command test -f "$LC_GATE_EVIDENCE/../reviewed" after-gate\n';
+
+test('the gate start holds with only an after-gate step missing; the merge and status do not', () => {
+  const [, pipe] = parseSteps(parseProject(AFTER.replace('$STATE', '/s')), 'pr');
+  assert.deepEqual(pipe, { id: 'pipeline', kind: 'command', arg: 'test -f "$LC_GATE_EVIDENCE/../reviewed"', if: null, afterGate: true });
+  const { repo, lc, git } = project(AFTER);
+  git('git checkout -q -b feat && git commit -q --allow-empty -m work');
+  const head = git('git rev-parse HEAD');
+  writeFileSync(join(repo, 'fit.md'), 'fits');
+  assert.equal(lc({}, 'record', 'pr', 'feat', 'fit', 'pass', '--evidence', 'fit.md', '--candidate', 'HEAD').status, 0);
+  const gate = fileURLToPath(new URL('./gate.mjs', import.meta.url));
+  const bin = mkdtempSync(join(tmpdir(), 'lc-gh-'));
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh\necho '{"headRefName":"feat","headRefOid":"${head}"}'\n`, { mode: 0o755 });
+  const hook = (command) =>
+    spawnSync('node', [gate, 'hook'], { cwd: repo, encoding: 'utf8', env: { ...process.env, LC_GATE_STEP: '', PATH: `${bin}:${process.env.PATH}` }, input: JSON.stringify({ tool_name: 'Bash', cwd: repo, tool_input: { command } }) });
+  const start = hook('no-mistakes axi run');
+  assert.equal(start.status, 0, start.stderr);
+  const ok = lc({}, 'check', 'pr', 'feat');
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /pipeline/);
+  const merge = hook('gh pr merge --squash');
+  assert.equal(merge.status, 2);
+  assert.match(merge.stderr, /pipeline: missing/);
+  assert.equal(lc({}, 'status', 'pr', 'feat', '--trailer').status, 1);
+  // The runner walks it last, after the pipeline: once the pipeline's result is there, it passes.
+  writeFileSync(join(repo, 'state/gates/pr/feat/reviewed'), 'yes');
+  const r = lc({}, 'run', 'pr', 'feat');
+  assert.match(r.stdout, /after the pipeline/);
+  assert.equal(hook('gh pr merge --squash').status, 0);
+});
+
+test('nobody records a command step pass by hand; the runner does', () => {
+  const { repo, lc } = project('handoff_dir: $STATE\ngate_phase:\n  build: command true\n');
+  writeFileSync(join(repo, 'log.txt'), 'ran it myself');
+  const r = lc({}, 'record', 'phase', 'x', 'build', 'pass', '--evidence', 'log.txt', '--candidate', 'HEAD');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /lc-gate run phase x --rerun build/);
+  assert.equal(lc({}, 'record', 'phase', 'x', 'build', 'fail', '--evidence', 'log.txt', '--candidate', 'HEAD').status, 0);
+  assert.equal(lc({}, 'record', 'phase', 'x', 'build', 'na', '--reason', 'nothing to build', '--candidate', 'HEAD').status, 0);
+});
+
+test("a session step's pass comes only from the session started for it", () => {
+  const { repo, lc } = project('handoff_dir: $STATE\ngate_phase:\n  review: session q.md\n');
+  const findings = join(repo, 'state/gates/phase/x/findings/review.md');
+  mkdirSync(join(findings, '..'), { recursive: true });
+  writeFileSync(findings, 'No findings.');
+  const lead = lc({}, 'record', 'phase', 'x', 'review', 'pass', '--evidence', findings, '--candidate', 'HEAD');
+  assert.equal(lead.status, 1);
+  assert.match(lead.stderr, /session step/);
+  const own = { LC_SESSION: 'gate-x-review', LC_GATE_STEP: 'phase/x/review' };
+  const r = lc(own, 'record', 'phase', 'x', 'review', 'pass', '--evidence', findings, '--candidate', 'HEAD');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(lc({}, 'record', 'phase', 'x', 'review', 'na', '--reason', 'no change to review', '--candidate', 'HEAD').status, 0);
 });
 
 test('the pre-commit template runs plan-check on the staged files', () => {

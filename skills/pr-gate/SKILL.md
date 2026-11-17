@@ -5,11 +5,15 @@ description: Use when a pull request's work is committed and must pass its gate 
 
 # PR gate
 
-The steps are the project's `gate_pr:` block; `paths:` says which files make a step with `if <key>` apply. Run `lc-gate run pr <branch>` (no id: the current branch) and rerun it after each step until `lc-gate check pr <branch>` holds. The runner runs `command` steps and spawns `session` steps; a `here` step is yours. Below is how to do the steps a project usually declares, and what a PR needs besides its records.
+The steps are the project's `gate_pr:` block; `paths:` says which files make a step with `if <key>` apply. Run `lc-gate run pr <branch>` (no id: the current branch) and rerun it after each step until `lc-gate check pr <branch>` holds. The runner runs `command` steps and spawns `session` steps; a `here` step is yours. You can't record a `command` step's pass (`lc-gate run pr <branch> --rerun <step>` runs it again) nor a `session` step's pass (only the session spawned for it can). Below is how to do the steps a project usually declares, and what a PR needs besides its records.
 
 ## Plan from the tools
 
 Where a step line in `gate_pr:` ends in `plan` (say `stack-fit: here docs/review/stack-fit.md plan`), the first act on the PR, before any code, is the plan. Read the project's list of chosen tools (the brief's **Stack fit**), open their documentation, and write one line per piece of work: "I will call `<function>` (`<docs page>`) for `<what>`". Only what no tool covers is your own code, with the reason. Record it before the first commit: `lc-gate record pr <branch> <step> plan --evidence <file>`; after the first commit it is refused. After coding, complete each line with the `file:line` of the call and record the step itself with that file. A branch that had commits before the gate saw it gets `plan na --reason …` from the orchestrator. Under `gate_pr_plan: enforce` the hook refuses an edit or a commit of a file the step applies to until the plan is recorded, and refuses `git commit --no-verify`; write the plan outside the repository or under `.agents/`, which the check ignores.
+
+## Steps after the review pipeline
+
+A step line ending in `after-gate` (after `plan` when both are there; say `pipeline: command <script> after-gate`) holds only once the project's review pipeline has reviewed this head. `lc-gate check pr <branch>` and the hook at the gate start skip it, so once `check` holds, start the pipeline; `check` names what is left for the merge. After the pipeline, rerun `lc-gate run pr <branch>`: it walks those steps last. The hook at `gh pr merge` and `lc-gate status pr <branch> --trailer` require them.
 
 ## Recording a `here` step
 
