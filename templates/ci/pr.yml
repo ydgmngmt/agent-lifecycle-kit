@@ -21,3 +21,15 @@ jobs:
       # <toolchain setup>
       - name: verify:pr
         run: <cmd> verify:pr
+      # A phase marked done needs its phase record with every gate_phase step held (lc-gate).
+      - uses: actions/checkout@<pinned sha>
+        with:
+          repository: <owner>/agent-lifecycle-kit
+          ref: <pinned kit commit>
+          path: .lc-kit
+          persist-credentials: false
+      - name: Phase record
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: .lc-kit/bin/lc-gate check phase --diff "$BASE" "$HEAD"

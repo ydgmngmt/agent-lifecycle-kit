@@ -27,4 +27,4 @@ done
 action=link
 [[ ${1:-} == --uninstall ]] && action=unlink_own
 for s in "$kit"/skills/*/; do s=${s%/}; $action "$s" "$skills_dir/$(basename "$s")"; done
-for b in "$kit"/bin/lc-spawn "$kit"/bin/lc-close "$kit"/bin/lc-view "$kit"/bin/lc-board; do $action "$b" "$bin_dir/$(basename "$b")"; done
+for b in "$kit"/bin/lc-spawn "$kit"/bin/lc-close "$kit"/bin/lc-view "$kit"/bin/lc-board "$kit"/bin/lc-gate; do $action "$b" "$bin_dir/$(basename "$b")"; done
