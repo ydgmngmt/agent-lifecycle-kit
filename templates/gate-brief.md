@@ -12,5 +12,5 @@
 
 1. Invoke the `review` skill with the question file.
 2. Write every finding to the output file in the skill's finding format, or "No findings." when there are none. The file is never empty.
-3. Record the step: `lc-gate record {{gate}} {{id}} {{step}} pass --evidence {{findings}}` when nothing you found blocks, `fail` when something does. You may record only this step, and never N/A.
+3. Record the step: `lc-gate record {{gate}} {{id}} {{step}} pass --evidence {{findings}}`, also when you have findings; record `fail` only for a critical finding or when the question file's fail condition is met. You may record only this step, and never N/A.
 4. Stop. The lead gives each finding its disposition.

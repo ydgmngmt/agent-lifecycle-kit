@@ -1,8 +1,9 @@
 // lc-gate: a gate's steps, declared in .agents/project.yaml, each leaving a record; `check` refuses
 // when a step has no valid record. Node 18+, no dependencies.
 //
-//   lc-gate run <phase|pr> [id] [--candidate <sha>] [--base <sha>]
-//                       idempotent walk: each step without a record gets the next thing for its kind
+//   lc-gate run <phase|pr> [id] [--candidate <sha>] [--base <sha>] [--rerun <step>[,<step>]]
+//                       idempotent walk: each step without a record gets the next thing for its kind;
+//                       a session step stale on a new candidate waits for --rerun or a carry
 //   lc-gate record <gate> <id> <step> pass|fail|na --evidence <path|url> [--reason …] [--carry]
 //   lc-gate status <gate> <id> [--candidate <sha>] [--write] [--trailer]
 //                       a table; --write generates the phase record, --trailer prints Verified-By
@@ -27,7 +28,7 @@
 // records only that step, only with findings/<step>.md present, and never N/A or a carry. Any other
 // caller is the lead (`by` is LC_SESSION, else "lead").
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, parseProject } from '../board/config.mjs';
@@ -260,12 +261,21 @@ function run(repo, [gate, idArg], flags) {
   };
   ctx.width = Math.max(...g.steps.map((s) => s.id.length));
   console.log(`${gate} ${id}: candidate ${sha.slice(0, 12)}, base ${base.slice(0, 12)}`);
+  // --rerun <step>[,<step>]: ignore the step's record and do it again (the only way a stale session
+  // step is started again on a new candidate; otherwise the lead carries it).
+  const rerun = new Set((flags.rerun ?? '').split(',').filter(Boolean));
+  for (const x of rerun) if (!g.steps.some((s) => s.id === x)) die(`--rerun ${x}: no such step`);
   let above = true; // every step above has a record for the candidate
   for (const s of g.steps) {
-    let r = g.records[s.id] && current(g.records[s.id].sha) ? g.records[s.id] : null;
+    let r = g.records[s.id] && current(g.records[s.id].sha) && !rerun.has(s.id) ? g.records[s.id] : null;
+    const old = g.records[s.id];
     const waits = ['command', 'here', 'owner'].includes(s.kind) && !above;
+    if (rerun.has(s.id) && s.kind === 'session') rmSync(join(g.dir, 'briefs', `${s.id}-${sha.slice(0, 12)}.md`), { force: true });
     if (r && !(s.kind === 'command' && r.status === 'fail' && !waits)) say(ctx, s, `${label(r)}, by ${r.by}${r.reason ? ` (${r.reason})` : ''}`);
     else if (!r && s.if && !touches(s.if)) r = put(ctx, s, 'na', '', `no file changed between ${base.slice(0, 12)} and ${sha.slice(0, 12)} matches paths.${s.if}`, 'lc-gate');
+    else if (s.kind === 'session' && old && !rerun.has(s.id)) {
+      say(ctx, s, `stale: ${label(old)} for ${old.sha.slice(0, 12)}. Rerun it with lc-gate run ${gate} ${id} --rerun ${s.id}, or carry it with lc-gate record ${gate} ${id} ${s.id} pass --carry --reason …`);
+    }
     else if (waits) say(ctx, s, r ? `${label(r)}; reruns once the steps above have records` : 'waits until every step above has a record');
     else {
       try {
