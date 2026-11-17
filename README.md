@@ -14,6 +14,10 @@
 
 **Gates that leave a record.** Each gate is a step list in the project file (`gate_pr:`, `gate_phase:`). The runner `lc-gate` walks it: it runs commands, starts CI workflows, spawns review sessions and asks the owner on the board. Every step leaves a record (PASS, FAIL, or N/A with a reason, which only the lead may give), bound to the candidate commit, and `lc-gate check` refuses while one is missing. A typical Phase exit: freeze, a regression run, the integration suite, seven review sessions (built as described, correctness, security, architecture, duplication, dead code, docs), findings with dispositions, fix and retest, the owner's acceptance, lessons.
 
+What a record proves, and what it doesn't: a workflow row is checked against the run on GitHub, and a review or `here` row against its committed findings file. Who wrote a record rests on the environment: a session spawned for one step carries `LC_GATE_STEP`, and `lc-gate record` keeps it to that step, never N/A or a carry. A session that unsets the variable is treated as the lead. The gate catches skipped steps and stale or failed results, not a session working against it.
+
+A phase's id in `lc-gate run phase <id>` is its roadmap heading's name in lower case with dashes (`## Core journeys (current)` is `core-journeys`), as on the board; the CI check requires a phase marked done to link the record of that id.
+
 **Testing strategy:**
 - Browser E2E runs are the primary way to find bugs.
 - Keep behaviour regressions at the lowest reliable level.
