@@ -5,6 +5,8 @@
 //                       idempotent walk: each step without a record gets the next thing for its kind;
 //                       a session step stale on a new candidate waits for --rerun or a carry
 //   lc-gate record <gate> <id> <step> pass|fail|na --evidence <path|url> [--reason …] [--carry]
+//   lc-gate record <gate> <id> <step> plan --evidence <file> | plan na --reason …
+//                       a planned step's plan, at the base, refused once the work has a commit
 //   lc-gate status <gate> <id> [--candidate <sha>] [--write] [--trailer]
 //                       a table; --write generates the phase record, --trailer prints Verified-By
 //   lc-gate check <gate> <id> [--candidate <sha>]      exits 1 listing missing, stale or failed steps
@@ -20,9 +22,12 @@
 // The PR gate's id is its branch (branchId). The phase gate needs --base on its first run.
 //
 // A gate is `phase` or `pr`; its steps are the block `gate_<gate>:` of the project file, one line
-// each: `<step>: <kind> <argument> [if <paths key>]`, kind command, workflow, session, here or owner.
+// each: `<step>: <kind> <argument> [if <paths key>] [plan]`, kind command, workflow, session, here or owner.
+// A here or session step ending in `plan` also needs records/<step>.plan.json, made before the first
+// commit of the work (an N/A plan, from the lead, when the work had commits before the gate saw it).
 // State: <handoff_dir>/gates/<gate>/<id>/ (else <repo>/.agents/gates/…): gate.json (candidate, base),
-// records/<step>.json (step, status, sha, evidence, by, at, reason; carried, spawned), findings/,
+// records/<step>.json (step, status, sha, evidence, by, at, reason; carried, spawned), records/<step>.plan.json
+// (the same with plan: true, sha the base, evidence a copy kept in evidence/), findings/,
 // evidence/, briefs/.
 // Who may record: a session lc-spawn started for a gate step has LC_GATE_STEP=<gate>/<id>/<step>; it
 // records only that step, only with findings/<step>.md present, and never N/A or a carry. Any other
@@ -36,6 +41,7 @@ import { loadConfig, parseProject } from '../board/config.mjs';
 
 export const KINDS = ['command', 'workflow', 'session', 'here', 'owner'];
 const STATUS = ['pass', 'fail', 'na'];
+const PLANNED_KINDS = ['here', 'session']; // the kinds a session does, so the kinds that can plan first
 const KIT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const COMMAND_TIMEOUT = 3_600_000; // a command step that runs longer is recorded as FAIL
 const GH_TIMEOUT = 60_000;
@@ -67,10 +73,14 @@ export function parseSteps(conf, gate) {
   for (const [key, value] of Object.entries(conf)) {
     if (!key.startsWith(prefix)) continue;
     const id = key.slice(prefix.length);
-    const m = value.match(/^(\S+)\s*(.*?)(?:\s+if\s+([\w-]+))?$/);
-    if (!m || !KINDS.includes(m[1])) die(`${prefix}${id}: "${value}" is not "<kind> <argument> [if <paths key>]" with kind ${KINDS.join(', ')}`);
+    // A trailing `plan` marks a here or session step as planned; on another kind it stays part of the
+    // argument, as it always was.
+    const kind = value.match(/^\S+/)?.[0];
+    const plan = PLANNED_KINDS.includes(kind) && /\splan$/.test(value);
+    const m = (plan ? value.replace(/\s+plan$/, '') : value).match(/^(\S+)\s*(.*?)(?:\s+if\s+([\w-]+))?$/);
+    if (!m || !KINDS.includes(m[1])) die(`${prefix}${id}: "${value}" is not "<kind> <argument> [if <paths key>] [plan]" with kind ${KINDS.join(', ')}`);
     if (m[3] && !conf[`paths.${m[3]}`]) die(`${prefix}${id}: "if ${m[3]}" names no paths.${m[3]}`);
-    steps.push({ id, kind: m[1], arg: m[2], if: m[3] ?? null });
+    steps.push({ id, kind: m[1], arg: m[2], if: m[3] ?? null, ...(plan ? { plan } : {}) });
   }
   return steps;
 }
@@ -93,8 +103,19 @@ export function check(steps, records, sha, current = (s) => s === sha) {
     else if (r.status === 'na' && who) problems.push(`${s.id}: N/A recorded by ${who}; only the lead may`);
     else if (r.carried && who) problems.push(`${s.id}: carried by ${who}; only the lead may`);
     else if (r.carried && !r.reason?.trim()) problems.push(`${s.id}: carried without a reason`);
+    if (s.plan && r?.status !== 'na') problems.push(...planProblems(s, records[`${s.id}.plan`]));
   }
   return problems;
+}
+
+// A planned step's plan record (records/<step>.plan.json): made before the branch's first commit, so
+// its commit is the base, not the candidate; `record … plan` refused it once the work had started.
+function planProblems(s, p) {
+  if (!p) return [`${s.id}: no plan recorded before the work`];
+  if (p.status !== 'pass' && p.status !== 'na') return [`${s.id}: plan has unknown status ${p.status}`];
+  if (p.status === 'na' && !p.reason?.trim()) return [`${s.id}: plan N/A without a reason`];
+  if (p.status === 'na' && p.spawned) return [`${s.id}: plan N/A recorded by spawned session ${p.by}; only the lead may`];
+  return [];
 }
 
 // The PR gate's rule: a record made at `sha` holds for head `head` when sha is the head, or an
@@ -136,7 +157,7 @@ export function readRecords(dir) {
   if (!existsSync(rdir)) return out;
   for (const f of readdirSync(rdir).filter((f) => f.endsWith('.json'))) {
     const r = readJson(join(rdir, f));
-    out[r.step] = r;
+    out[r.plan ? `${r.step}.plan` : r.step] = r;
   }
   return out;
 }
@@ -166,10 +187,11 @@ const currentFor = (g, gate, sha) => (gate === 'pr' ? prCurrent(g.cfg.repo, sha)
 
 // --- commands ----------------------------------------------------------------------------------
 
-function record(repo, [gate, id, step, status], flags) {
+function record(repo, [gate, id, step, status, planStatus], flags) {
   const g = load(repo, gate, id);
   const s = g.steps.find((x) => x.id === step);
   if (!s) die(`no step ${step} in gate_${gate}; steps: ${g.steps.map((x) => x.id).join(', ')}`);
+  if (status === 'plan') return recordPlan(g, gate, id, s, planStatus ?? 'pass', flags);
   if (!STATUS.includes(status)) die(`status must be pass, fail or na, not ${status}`);
   if (s.kind === 'owner') die(`${step} is an owner step: only the owner's answer on the board records it (lc-gate run)`);
   const own = process.env.LC_GATE_STEP;
@@ -211,7 +233,43 @@ function record(repo, [gate, id, step, status], flags) {
   console.log(`recorded ${gate} ${id} ${step}: ${status}${rec.carried ? ' (carried)' : ''} for ${sha.slice(0, 12)}`);
 }
 
-const label = (r) => (r ? `${r.status === 'na' ? 'N/A' : r.status.toUpperCase()}${r.carried ? ' carried' : ''}` : '-');
+// `record <gate> <id> <step> plan --evidence <file>`: the plan of a step whose line ends in `plan`,
+// made at the base before the work's first commit; `plan na --reason …` (the lead only) when the
+// branch already had commits when the gate first saw it. Kept beside the final record, not over it.
+function recordPlan(g, gate, id, s, status, flags) {
+  if (!s.plan) die(`${s.id} has no plan: its line in gate_${gate} does not end with "plan"`);
+  if (status !== 'pass' && status !== 'na') die(`a plan is recorded with "plan --evidence <file>", or by the lead with "plan na --reason …"; not "plan ${status}"`);
+  if (flags.carry) die('a plan is not carried: it is made once, before the work');
+  const own = process.env.LC_GATE_STEP;
+  if (own && own !== `${gate}/${id}/${s.id}`) die(`this session is step ${own}; it may record only that step`);
+  if (own && status === 'na') die('a spawned session may not record N/A; only the lead may');
+  const reason = flags.reason?.trim() || '';
+  const repo = g.cfg.repo;
+  const branch = gate === 'pr' && exec('git', ['-C', repo, 'rev-parse', '--verify', '-q', `refs/heads/${id}`], { ok: true }).status === 0;
+  const head = verify(repo, branch ? `refs/heads/${id}` : 'HEAD');
+  const base = flags.base ? verify(repo, flags.base) : gate === 'pr' ? git(repo, 'merge-base', mainRef(repo), head) : g.state.base;
+  if (!base) die(`the phase gate's plan needs --base <main before the phase's first merge>`);
+  let evidence = '';
+  if (status === 'na') {
+    if (!reason) die('a plan N/A needs --reason: why no plan was recorded before the work');
+  } else {
+    const commits = Number(git(repo, 'rev-list', '--count', `${base}..${head}`));
+    if (commits) die(`the plan comes before the first commit: ${gate === 'pr' ? `branch ${id}` : 'the phase'} already has ${commits} commit(s) beyond its base ${base.slice(0, 12)}. If the work started before the gate saw it, the lead records lc-gate record ${gate} ${id} ${s.id} plan na --reason …`);
+    if (!flags.evidence || isUrl(flags.evidence)) die('a plan needs --evidence <file>: per piece of work, "I will call <function> (<docs page>) for <what>"');
+    const from = resolve(flags.evidence);
+    if (!nonEmpty(from)) die(`evidence ${from} is missing or empty`);
+    // A copy, so completing the lines with file:line afterwards leaves the plan as it was made.
+    evidence = join(g.dir, 'evidence', `${s.id}.plan${extname(from) || '.md'}`);
+    mkdirSync(dirname(evidence), { recursive: true });
+    if (from !== evidence) copyFileSync(from, evidence);
+  }
+  const rec = { step: s.id, plan: true, status, sha: base, evidence, by: process.env.LC_SESSION || 'lead', at: new Date().toISOString(), reason };
+  if (own) rec.spawned = true;
+  writeJson(join(g.dir, 'records', `${s.id}.plan.json`), rec);
+  console.log(`recorded ${gate} ${id} ${s.id} plan: ${label(rec)} at the base ${base.slice(0, 12)}`);
+}
+
+const label = (r) =>(r ? `${r.status === 'na' ? 'N/A' : r.status.toUpperCase()}${r.carried ? ' carried' : ''}` : '-');
 
 function status(repo, [gate, id], flags) {
   const g = load(repo, gate, id);
@@ -233,6 +291,8 @@ function status(repo, [gate, id], flags) {
     const r = g.records[s.id];
     const stale = r && !current(r.sha) ? ' (stale)' : '';
     rows.push([s.id, s.kind, label(r) + stale, r ? r.sha.slice(0, 12) : '', r?.by ?? '', [r?.evidence, r?.reason].filter(Boolean).join(' · ')]);
+    const p = s.plan ? g.records[`${s.id}.plan`] : null;
+    if (s.plan) rows.push([`${s.id} (plan)`, '', p ? `${label(p)} at base` : '-', p ? p.sha.slice(0, 12) : '', p?.by ?? '', [p?.evidence, p?.reason].filter(Boolean).join(' · ')]);
   }
   const width = rows[0].map((_, i) => Math.max(...rows.map((r) => r[i].length)));
   console.log(`${gate} ${id}, candidate ${sha}`);
@@ -285,9 +345,16 @@ async function run(repo, [gate, idArg], flags) {
   const rerun = new Set((flags.rerun ?? '').split(',').filter(Boolean));
   for (const x of rerun) if (!g.steps.some((s) => s.id === x)) die(`--rerun ${x}: no such step`);
   let above = true; // every step above has a record for the candidate
+  let commits;
   for (const s of g.steps) {
     let r = g.records[s.id] && current(g.records[s.id].sha) && !rerun.has(s.id) ? g.records[s.id] : null;
     const old = g.records[s.id];
+    if (s.plan && !g.records[`${s.id}.plan`] && r?.status !== 'na') {
+      commits ??= Number(git(repo, 'rev-list', '--count', `${base}..${sha}`));
+      say(ctx, s, commits
+        ? `no plan recorded before the work, and the work has ${commits} commit(s) already: the lead records lc-gate record ${gate} ${id} ${s.id} plan na --reason …`
+        : `plan now, before the first commit: from the project's chosen tools and their docs, one line per piece of work, "I will call <function> (<docs page>) for <what>"; then lc-gate record ${gate} ${id} ${s.id} plan --evidence <file>`);
+    }
     const waits = ['command', 'here', 'owner'].includes(s.kind) && !above;
     if (rerun.has(s.id) && s.kind === 'session') rmSync(join(g.dir, 'briefs', `${s.id}-${sha.slice(0, 12)}.md`), { force: true });
     if (r && !(s.kind === 'command' && r.status === 'fail' && !waits)) say(ctx, s, `${label(r)}, by ${r.by}${r.reason ? ` (${r.reason})` : ''}`);
@@ -453,7 +520,17 @@ function writeRecord(g, gate, id, sha) {
       evidence = relative(g.cfg.repo, to);
     } else if (s.kind === 'command') evidence = r.status === 'na' ? '' : `\`${s.arg}\` ${r.status === 'pass' ? 'exit 0' : r.reason}`;
     const reason = r.carried ? `carried from ${r.carried.from.slice(0, 12)}: ${r.reason}` : r.reason;
-    return `| ${s.id} | ${s.kind} | ${label(r)} | ${r.sha} | ${cell(r.by)}${r.spawned ? ' (spawned)' : ''} | ${cell(evidence)} | ${cell(reason)} |`;
+    const row = (x, step, ev, why) => `| ${step} | ${s.kind} | ${label(x)} | ${x.sha} | ${cell(x.by)}${x.spawned ? ' (spawned)' : ''} | ${cell(ev)} | ${cell(why)} |`;
+    // A planned step's plan is its own row, <step>.plan, at the base; the CI form checks it like the step.
+    const p = s.plan ? g.records[`${s.id}.plan`] : null;
+    let planEvidence = p?.evidence;
+    if (p?.status === 'pass' && planEvidence) {
+      const to = join(g.cfg.repo, dirRel, id, `${s.id}.plan${extname(planEvidence) || '.md'}`);
+      mkdirSync(dirname(to), { recursive: true });
+      copyFileSync(planEvidence, to);
+      planEvidence = relative(g.cfg.repo, to);
+    }
+    return [row(r, s.id, evidence, reason), ...(p ? [row(p, `${s.id}.plan`, planEvidence, p.reason)] : [])].join('\n');
   });
   const text = [
     `# Phase record: ${id}`,

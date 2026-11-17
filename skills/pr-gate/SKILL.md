@@ -7,6 +7,10 @@ description: Use when a pull request's work is committed and must pass its gate 
 
 The steps are the project's `gate_pr:` block; `paths:` says which files make a step with `if <key>` apply. Run `lc-gate run pr <branch>` (no id: the current branch) and rerun it after each step until `lc-gate check pr <branch>` holds. The runner runs `command` steps and spawns `session` steps; a `here` step is yours. Below is how to do the steps a project usually declares, and what a PR needs besides its records.
 
+## Plan from the tools
+
+Where a step line in `gate_pr:` ends in `plan` (say `stack-fit: here docs/review/stack-fit.md plan`), the first act on the PR, before any code, is the plan. Read the project's list of chosen tools (the brief's **Stack fit**), open their documentation, and write one line per piece of work: "I will call `<function>` (`<docs page>`) for `<what>`". Only what no tool covers is your own code, with the reason. Record it before the first commit: `lc-gate record pr <branch> <step> plan --evidence <file>`; after the first commit it is refused. After coding, complete each line with the `file:line` of the call and record the step itself with that file. A branch that had commits before the gate saw it gets `plan na --reason …` from the orchestrator.
+
 ## Recording a `here` step
 
 Write what you did and saw to `<handoff_dir>/gates/pr/<branch>/evidence/<step>.md`, then `lc-gate record pr <branch> <step> pass|fail --evidence <that file>`. A step that doesn't apply to this change still gets a record: tell the orchestrator, who records N/A with the reason. A new commit makes the records stale; rerun `lc-gate run pr` and redo what it lists.

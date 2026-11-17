@@ -155,6 +155,52 @@ test('nobody records the owner step by hand', () => {
   assert.match(lc({}, 'record', 'phase', 'x', 'acceptance', 'pass', '--evidence', 'yes.txt', '--candidate', 'HEAD').stderr, /only the owner's answer on the board/);
 });
 
+// A plan: a step line ending in `plan` needs records/<step>.plan.json, made before the branch's first commit.
+const PLANNED = 'handoff_dir: $STATE\npaths:\n  mech: src/**\ngate_pr:\n  fit: here docs/fit.md if mech plan\n';
+
+test('a planned step without a plan record fails the check', () => {
+  const [fit] = parseSteps(parseProject(PLANNED.replace('$STATE', '/s')), 'pr');
+  assert.deepEqual(fit, { id: 'fit', kind: 'here', arg: 'docs/fit.md', if: 'mech', plan: true });
+  assert.deepEqual(check([fit], { fit: pass('fit') }, A), ['fit: no plan recorded before the work']);
+  assert.deepEqual(check([fit], { fit: pass('fit'), 'fit.plan': pass('fit', { plan: true, sha: B }) }, A), []);
+  assert.deepEqual(check([fit], { fit: pass('fit', { status: 'na', reason: 'no src change' }) }, A), []);
+});
+
+test('a plan recorded after a commit is refused', () => {
+  const { repo, lc, git } = project(PLANNED);
+  git('git checkout -q -b feat && git commit -q --allow-empty -m work');
+  writeFileSync(join(repo, 'plan.md'), 'I will call parse (docs/api.md) for the input.');
+  const r = lc({}, 'record', 'pr', 'feat', 'fit', 'plan', '--evidence', 'plan.md');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /the plan comes before the first commit/);
+});
+
+test('a plan recorded at the base, then the final record, holds', () => {
+  const { repo, lc, git } = project(PLANNED);
+  git('git checkout -q -b feat');
+  writeFileSync(join(repo, 'plan.md'), 'I will call parse (docs/api.md) for the input.');
+  assert.equal(lc({}, 'record', 'pr', 'feat', 'fit', 'plan', '--evidence', 'plan.md').status, 0);
+  writeFileSync(join(repo, 'plan.md'), 'I will call parse (docs/api.md) for the input: src/a.js:3');
+  mkdirSync(join(repo, 'src'));
+  writeFileSync(join(repo, 'src/a.js'), 'parse(x);\n');
+  git('git add src && git commit -qm work');
+  assert.match(lc({}, 'check', 'pr', 'feat', '--candidate', 'HEAD').stderr, /fit: missing/);
+  assert.equal(lc({}, 'record', 'pr', 'feat', 'fit', 'pass', '--evidence', 'plan.md', '--candidate', 'HEAD').status, 0);
+  const ok = lc({}, 'check', 'pr', 'feat');
+  assert.equal(ok.status, 0, ok.stderr);
+});
+
+test('an N/A plan by a spawned gate session is refused', () => {
+  const { lc, git } = project(PLANNED);
+  git('git checkout -q -b feat && git commit -q --allow-empty -m work');
+  const spawned = { LC_SESSION: 'gate-feat-fit', LC_GATE_STEP: 'pr/feat/fit' };
+  assert.match(lc(spawned, 'record', 'pr', 'feat', 'fit', 'plan', 'na', '--reason', 'r').stderr, /may not record N\/A/);
+  const [fit] = parseSteps(parseProject(PLANNED.replace('$STATE', '/s')), 'pr');
+  const na = pass('fit', { plan: true, status: 'na', reason: 'r', by: 'gate-feat-fit', spawned: true });
+  assert.deepEqual(check([fit], { fit: pass('fit'), 'fit.plan': na }, A), ['fit: plan N/A recorded by spawned session gate-feat-fit; only the lead may']);
+  assert.equal(lc({}, 'record', 'pr', 'feat', 'fit', 'plan', 'na', '--reason', 'branch had commits when the gate first saw it').status, 0);
+});
+
 test('a command step does not run on a dirty tree', () => {
   const { repo, lc } = project('handoff_dir: $STATE\ngate_phase:\n  build: command true\n');
   writeFileSync(join(repo, '.agents/project.yaml'), `handoff_dir: ${repo}/state\ngate_phase:\n  build: command true\n# dirty\n`);

@@ -10,6 +10,9 @@ Read `.agents/project.yaml`, then `docs.agents`, `docs.testing` and `docs.lifecy
 ## Goal and why
 <the outcome a person can observe, and the story or issue it serves>
 
+## Stack fit
+<the chosen tools for this work, each with its docs: what the session plans from before any code; written by the orchestrator before the session starts>
+
 ## Reuse
 <owners from the code map to extend; existing code to call>
 

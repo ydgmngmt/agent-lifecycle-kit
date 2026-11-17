@@ -86,6 +86,7 @@ gate_pr:
   self-review: here code-review against the base, the brief as the spec
   live-check: here the project's verify skill on the changed flow if flow
   reviewer: session docs/review-checklist.md if sensitive
+  # stack-fit: here docs/review/stack-fit.md if flow plan   # `plan`: a plan recorded before the first commit (lc-gate record … plan)
 
 gate_phase:
   freeze: command <script that writes the evidence folder: PR list, files, surface diff, baseline growth, quality lists>
