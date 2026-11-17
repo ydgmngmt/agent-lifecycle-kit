@@ -27,7 +27,7 @@
 // records only that step, only with findings/<step>.md present, and never N/A or a carry. Any other
 // caller is the lead (`by` is LC_SESSION, else "lead").
 import { spawnSync } from 'node:child_process';
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, parseProject } from '../board/config.mjs';
@@ -521,6 +521,65 @@ export function gateRows(repo) {
   return out.sort((a, b) => b.at - a.at).slice(0, 4);
 }
 
+// --- the hook ----------------------------------------------------------------------------------
+
+// PreToolUse on Bash (hooks/hooks.json filters to the gate start and the merge). Reads the hook's
+// JSON on stdin. Does nothing without gate_pr or with gate_pr_mode off; observe (the default) logs
+// to <gates>/observe.log and tells the session what enforce would refuse; enforce exits 2 with the
+// missing steps. Its own errors are logged and let the command through.
+function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
+  let log = null;
+  const note = (entry) => log && appendFileSync(log, JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\n');
+  try {
+    const input = JSON.parse(stdin);
+    const command = String(input.tool_input?.command ?? '');
+    const point = /\bno-mistakes\s+axi\s+run\b/.test(command) ? 'gate start' : /\bgh\s+pr\s+merge\b/.test(command) ? 'merge' : null;
+    if (!point) return 0;
+    // `cd <dir> && …` runs the gate or the merge from <dir>.
+    const cd = command.match(/(?:^|&&|;)\s*cd\s+("[^"]+"|'[^']+'|\S+)\s*&&/)?.[1]?.replace(/^["']|["']$/g, '');
+    const cwd = resolve(input.cwd || process.cwd(), cd ?? '.');
+    const repo = exec('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { ok: true }).stdout.trim();
+    if (!repo || !existsSync(join(repo, '.agents/project.yaml'))) return 0;
+    const cfg = loadConfig(repo);
+    const mode = cfg.conf.gate_pr_mode || 'observe';
+    const steps = parseSteps(cfg.conf, 'pr');
+    if (!steps.length || mode === 'off') return 0;
+    mkdirSync(gatesRoot(cfg), { recursive: true });
+    log = join(gatesRoot(cfg), 'observe.log');
+    let branch;
+    let head;
+    if (point === 'merge') {
+      const pr = command.match(/\bgh\s+pr\s+merge\b[^;&|\n]*?(?:\/pull\/|\s#?)(\d+)(?=\s|$|[;&|])/)?.[1];
+      const view = JSON.parse(exec('gh', ['pr', 'view', ...(pr ? [pr] : []), '--json', 'headRefName,headRefOid'], { cwd: repo, timeout: GH_TIMEOUT }).stdout);
+      [branch, head] = [view.headRefName, view.headRefOid];
+    } else {
+      [branch, head] = [git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD'), git(cwd, 'rev-parse', 'HEAD')];
+    }
+    const id = branchId(branch);
+    const missing = check(steps, readRecords(gateDir(cfg, 'pr', id)), head, prCurrent(repo, head));
+    if (!missing.length) return 0;
+    const session = process.env.LC_SESSION || input.session_id || '';
+    const what = `the PR gate for ${branch} at ${head.slice(0, 12)} does not hold:\n  ${missing.join('\n  ')}\nRun lc-gate run pr ${id}, then record each step.`;
+    if (mode === 'enforce') {
+      note({ mode, point, branch, head, missing, session, refused: true });
+      process.stderr.write(`lc-gate: ${what}\n`);
+      return 2;
+    }
+    note({ mode, point, branch, head, missing, session });
+    const context = `lc-gate (observe mode): this ${point} went ahead, but enforce mode would have refused it: ${what}`;
+    console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: context } }));
+    return 0;
+  } catch (err) {
+    try {
+      note({ error: err.message });
+    } catch {
+      // nowhere to log
+    }
+    process.stderr.write(`lc-gate hook: ${err.message} (the command goes ahead)\n`);
+    return 0;
+  }
+}
+
 // --- main --------------------------------------------------------------------------------------
 
 const BOOLEAN = new Set(['carry', 'write', 'trailer']);
@@ -541,7 +600,7 @@ export function main(argv, cwd = process.cwd()) {
   const [cmd, ...rest] = argv;
   const repo = exec('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { ok: true }).stdout.trim() || cwd;
   const { pos, flags } = parseArgs(rest);
-  const commands = { run, record, status, check: (r, p, f) => (f.diff ? checkPhaseDiff(r, f.diff, p[1]) : checkGate(r, p, f)) };
+  const commands = { run, record, status, hook, check: (r, p, f) => (f.diff ? checkPhaseDiff(r, f.diff, p[1]) : checkGate(r, p, f)) };
   if (!commands[cmd]) die(`usage: lc-gate run|record|status|check …; see the top of gate/gate.mjs`);
   return commands[cmd](repo, pos, flags) ?? 0;
 }
