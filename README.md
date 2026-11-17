@@ -1,31 +1,18 @@
 # agent-lifecycle-kit: ADLC
 
-**ADLC (agent-driven development lifecycle)**, packaged as skills, tools and templates. The kit knows nothing about any one project; each repository keeps its own values in `.agents/project.yaml`.
+**ADLC (agent-driven development lifecycle)**, packaged as skills, tools and templates. The kit knows nothing about any one project; each repository keeps its own values in `.agents/project.yaml`, including the steps of its gates.
 
 ![Agent-driven development lifecycle](docs/adlc.png)
 
 ## The lifecycle
 
-1. **Product scope:** PRD → user stories → phases.
-2. **Phase acceptance:** agree on the phase's user outcomes, failure cases and invariants. These are its acceptance criteria.
-3. **Agent brief:** scope one small, mergeable change and name its owner.
-4. **Parallel implementation:** an orchestrator session assigns briefs to agent sessions (10+ at peak), each in its own worktree and able to spawn subagents. Status and questions go up; peers coordinate shared files before editing them.
-5. **Verification gates**; a fix at any gate loops back to implementation:
-   - **Commit:** typecheck and run the targeted behaviour tests.
-   - **Pull request and protected merge:**
-     - **Changed flow:** exercised in the browser or the live API.
-     - **PR CI:** build, typecheck, lint, unit tests, boundaries, API contracts, quality baselines and dependency scanning.
-     - **Review:** an independent review of the change and its test evidence.
-     - **Sensitive changes:** approval by the role the project file names (the human owner for protected files, an independent reviewer session for sensitive code paths) and targeted tests for the affected invariants.
-     - **Merge candidate:** the required checks pass with the PR applied to the current main.
-   - **Nightly on main:** the full integration suite.
-   - **Phase exit:**
-     - **Browser E2E:** the phase journeys on a fresh stack at the frozen merged commit.
-     - **Evidence:** pass or fail per acceptance criterion, with traces and the SHA.
-     - **Other checks:** API replay, navigation speed and data volume.
-     - **Phase review:** architecture, reuse, security and quality across the merged PRs.
-     - **Disposition:** failed exit criteria block; other findings become follow-up PRs; each bug found live adds a regression check.
-6. Once the exit criteria pass, the **next phase** starts.
+1. **Product scope:** PRD → user stories → phases, and each phase's acceptance criteria (user outcomes, failure cases, invariants).
+2. **Briefs:** one small, mergeable change per brief, with a named owner.
+3. **Parallel implementation:** an orchestrator session assigns briefs to agent sessions (10+ at peak), each in its own worktree and able to spawn subagents. Status and questions go up; peers coordinate shared files before editing them.
+4. **PR gate**, per change, and **Phase exit**, once a phase's PRs have merged. A fix at any gate loops back to implementation.
+5. Once the phase exits, the **next phase** starts.
+
+**Gates that leave a record.** Each gate is a step list in the project file (`gate_pr:`, `gate_phase:`). The runner `lc-gate` walks it: it runs commands, starts CI workflows, spawns review sessions and asks the owner on the board. Every step leaves a record (PASS, FAIL, or N/A with a reason, which only the lead may give), bound to the candidate commit, and `lc-gate check` refuses while one is missing. A typical Phase exit: freeze, a regression run, the integration suite, seven review sessions (built as described, correctness, security, architecture, duplication, dead code, docs), findings with dispositions, fix and retest, the owner's acceptance, lessons.
 
 **Testing strategy:**
 - Browser E2E runs are the primary way to find bugs.
@@ -38,19 +25,21 @@ The `lifecycle` skill holds the full map of steps, roles and skills.
 
 | Path | What |
 | --- | --- |
-| `skills/lifecycle` | The lifecycle, the finding format with its dispositions, and the report format |
-| `skills/{shape-product,phase-acceptance,agent-brief,commit-check,pr-check,phase-exit}` | One skill per step |
-| `skills/{orchestrator,implementer,live-check,pr-reviewer,phase-run}` | Coordinating and checking roles |
-| `skills/review-*`, `skills/{duplication,dead-code}-check` | Phase-review dimensions and quality checks |
-| `skills/board`, `skills/board-keeper` | How every session uses the owner's board (questions, same-turn status, answers with outcomes, nothing unverified shown as done), and the cheap keeper session that keeps it true with `lc-board` setters |
-| `skills/update-docs` | "Update the docs": one sweep that brings the domain docs and the lifecycle docs in line with what was decided and built since the last run |
+| `skills/lifecycle` | The map of steps, roles and gates; the finding format with its dispositions; the report format |
+| `skills/shape-product` | Product scope and a phase's acceptance criteria |
+| `skills/orchestrator`, `skills/implementer` | The lead (briefs, sessions, merges) and the session that builds one PR |
+| `skills/pr-gate`, `skills/phase-exit` | Running each gate with `lc-gate`, and how to do its `here` steps |
+| `skills/review` | A gate session: answer one question file, write the findings, record the step |
+| `skills/board` | How every session uses the owner's board, and the keeper session that keeps it true |
+| `skills/update-docs` | "Update the docs": one sweep that brings the domain docs and the lifecycle docs in line with what was decided and built |
 | `skills/bootstrap` | A guided, resumable readiness check that takes a repository to ready (`checklist.md`) |
+| `gate/`, `bin/lc-gate` | The gate runner: `run`, `record`, `status`, `check` |
 | `bin/lc-spawn`, `lc-close`, `lc-view` | Start, close and watch agent sessions in tmux |
-| `board/`, `bin/lc-board` | The owner's local page: phases, journeys, changes and criteria from the roadmap, live PRs and sessions, and the open questions with a place to answer them. `lc-board` also has one-line setters, `answers --wait`, `stale` and `keeper` |
-| `templates/` | `project.yaml`, lifecycle, roadmap, acceptance criteria, testing, phase exit, brief, watchdog prompt and running log, CI for the pr, nightly and phase profiles |
+| `board/`, `bin/lc-board` | The owner's local page: phases, journeys, changes and criteria from the roadmap, live PRs and sessions, and the open questions with a place to answer them |
+| `templates/` | `project.yaml` with the gate blocks, the review question files (`review/*.md`), the gate brief, lifecycle, roadmap, acceptance criteria, testing, the phase exit's values and record, brief, watchdog prompt, CI for the pr, nightly and phase profiles |
 | `docs/adlc.png` | The diagram |
 
-The step and role skills invoke the [mattpocock-skills](https://github.com/mattpocock/skills) set (`grilling`, `domain-modeling`, `research`, `prototype`, `codebase-design`, `tdd`, `diagnosing-bugs`, `code-review`, `pr`, `writing-for-agents`). Install it alongside this kit.
+The skills invoke the [mattpocock-skills](https://github.com/mattpocock/skills) set (`grilling`, `domain-modeling`, `research`, `prototype`, `codebase-design`, `tdd`, `diagnosing-bugs`, `code-review`, `pr`, `writing-for-agents`). Install it alongside this kit.
 
 ## Install
 
@@ -63,11 +52,18 @@ The step and role skills invoke the [mattpocock-skills](https://github.com/mattp
 
 Skills are then named `agent-lifecycle-kit:<skill>`.
 
-**Codex and the shell:** run `./install.sh`. It links `skills/*` into `~/.agents/skills` (which Codex reads) and `bin/lc-*` into `~/.local/bin`. It never overwrites an entry that isn't its own link; `./install.sh --uninstall` removes the links. Don't link the skills into `~/.claude/skills` as well, or Claude Code lists each one twice.
+**Codex and the shell:** run `./install.sh`. It links `skills/*` into `~/.agents/skills` (which Codex reads) and `bin/lc-*` into `~/.local/bin`, and removes its links to skills the kit no longer has. It never overwrites an entry that isn't its own link; `./install.sh --uninstall` removes the links. Don't link the skills into `~/.claude/skills` as well, or Claude Code lists each one twice.
 
 ## A new repository
 
-In a session in that repository, new or existing, invoke the `bootstrap` skill. It maps what the repository already has to the readiness checklist, shows what is present, incomplete or missing, and guides through each open item until the project is ready to start a phase. It never overwrites a file; `.agents/project.yaml` points to the existing ones.
+In a session in that repository, new or existing, invoke the `bootstrap` skill. It maps what the repository already has to the readiness checklist, shows what is present, incomplete or missing, and guides through each open item until the project is ready to start a phase, gate steps and question files included. It never overwrites a file; `.agents/project.yaml` points to the existing ones.
+
+## From 0.8
+
+- **Skills merged, 23 into 10.** `phase-acceptance` is in `shape-product`; `agent-brief` in `orchestrator`; `commit-check` in `implementer`; `pr-check`, `live-check` and `pr-reviewer` in `pr-gate`; `phase-run` in `phase-exit`; the five `review-*`, `duplication-check` and `dead-code-check` in `review`, with their questions moved to `templates/review/*.md`; `board-keeper` in `board`. Run `./install.sh` again to drop the old links.
+- **New project.yaml keys:** `gate_pr_mode`, `paths`, `gate_pr`, `gate_phase`. Copy the blocks from `templates/project.yaml` and the question files from `templates/review/` into the repo, or rerun `bootstrap`.
+- **CI:** the phase workflow takes a `candidate` input and names it in its `run-name`; the PR workflow runs `lc-gate check phase --diff`.
+- `docs.phase_review` now holds only the project's values; the record is generated by `lc-gate status phase <id> --write` into `docs.phase_records`.
 
 ## Machine-specific pieces
 
