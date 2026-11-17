@@ -63,6 +63,9 @@ if [[ $agent == claude ]]; then
     pane=$(tmux capture-pane -p -t "$window" 2>/dev/null) || break
     if asks "$pane"; then
       if trusted "$dir"; then
+        # The cursor is not always on "Yes": move it there, then confirm.
+        at=$(awk '/❯/{c=NR} /Yes/{y=NR} END{print (c && y) ? y - c : 0}' <<<"$pane")
+        for ((k = 0; k < ${at#-}; k++)); do tmux send-keys -t "$window" "$([[ $at -gt 0 ]] && echo Down || echo Up)"; done
         tmux send-keys -t "$window" Enter
         # Answered only once the pane no longer shows the prompt.
         gone=""

@@ -63,6 +63,16 @@ test('a gate session runs on sessions.gate_model and gate_effort, opus and xhigh
   assert.match(g.calls(), /--model fable --effort max/);
 });
 
+test('lc-spawn moves to "Yes" when the folder-trust prompt starts on "No"', () => {
+  const f = fixture(SESSION.replace('$STATE', mkdtempSync(join(tmpdir(), 'lc-handoff-'))));
+  f.pane('Quick safety check: Is this a project you created or one you trust?\n\n ❯ No, exit\n   Yes, I trust this folder\n');
+  const wt = join(f.repo, '..', `${f.repo.split('/').at(-1)}-wt2`);
+  f.sh(`git worktree add -q --detach ${wt}`);
+  const r = f.spawn(wt, f.repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(f.calls(), /^send-keys -t @7 Down\nsend-keys -t @7 Enter$/m);
+});
+
 test("lc-spawn answers the folder-trust prompt for a folder of the repository's worktrees or handoff dir", () => {
   const handoff = mkdtempSync(join(tmpdir(), 'lc-handoff-'));
   const f = fixture(SESSION.replace('$STATE', handoff));
