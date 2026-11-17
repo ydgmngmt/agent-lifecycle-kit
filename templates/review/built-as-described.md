@@ -10,4 +10,6 @@ Inputs: the phase's acceptance criteria and journeys (`docs.roadmap`, `docs.acce
 4. Failure cases: drive each refusal, conflict, restart or missing right the criteria name. Does the person see what the criterion says?
 5. Design: compare style and layout only (spacing, hierarchy, type, colour, components used) with the given design. Copy and data are not judged here.
 
-Fail condition: any criterion FAIL or NOT TESTED. A step you could not do (it needs a person or a live model) is MANUAL, with what it needs.
+A step you could not do (it needs a person or a live model) is MANUAL, with what it needs.
+
+**Fail condition:** an acceptance criterion FAIL or NOT TESTED, or a critical finding.

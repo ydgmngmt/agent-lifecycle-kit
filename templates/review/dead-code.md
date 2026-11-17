@@ -13,3 +13,5 @@ Inputs: the evidence folder (changed files, baseline growth, dead-code list), `c
 4. **Baseline growth** without the reason its PR states.
 
 Before proposing a deletion, confirm there is no dynamic use: search for the name as a string, a route, or a config key. After a fix, `checks.dead_code --prune`.
+
+**Fail condition:** a critical finding (a project invariant can be broken now). Everything else is a follow-up for the lead.

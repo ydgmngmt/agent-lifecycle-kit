@@ -10,3 +10,5 @@ Inputs: the evidence folder (changed files, report-only lint on them, the baseli
 4. **Effects.** A read-then-act outside the effect's transaction; an outside call without an operation ID, a timeout, or a way to reconcile an unknown outcome; a retry that can repeat an effect.
 5. **States with no exit.** A status that an exception, a restart or a stop can leave with no transition out, or that more than one place writes.
 6. **Lint.** Report-only lint findings on lines the change added.
+
+**Fail condition:** a critical finding (a project invariant can be broken now). Everything else is a follow-up for the lead.

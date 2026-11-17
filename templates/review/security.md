@@ -12,3 +12,5 @@ Inputs: the evidence folder, `sensitive`, `docs.code_map`, the project's invaria
 6. **The checklist's security questions** (`docs.review_checklist`), asked of the whole change.
 
 Any finding that breaks a project invariant now is critical: send it to the lead at once.
+
+**Fail condition:** a critical finding (a project invariant can be broken now). Everything else is a follow-up for the lead.

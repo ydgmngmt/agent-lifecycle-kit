@@ -20,3 +20,5 @@ Inputs: the evidence folder (changed files, surface diff), `docs.code_map`, `doc
 14. **The whole change.** What does it add up to, beyond each file?
 
 End with the three changes that would most make this code easier to keep building on, each filed as a proposed issue.
+
+**Fail condition:** a critical finding (a project invariant can be broken now). Everything else is a follow-up for the lead.

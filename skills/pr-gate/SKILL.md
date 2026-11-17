@@ -29,7 +29,7 @@ A change with no flow to show still needs evidence: for docs, every link resolve
 
 ## Reviewer (sensitive path)
 
-A `session` step: the runner spawns an independent session that follows `review` with the project's checklist, never the implementer. Its findings go to the implementer, with a copy to the orchestrator. Commits after its PASS make that record stale; the next `lc-gate run pr` starts the review again on the new head, and the reviewer reads the commits since its last record.
+A `session` step: the runner spawns an independent session that follows `review` with the project's checklist, never the implementer. Its findings go to the implementer, with a copy to the orchestrator. It records `fail` on a critical finding or a must-fix finding still open at the head. Commits after its PASS make that record stale, and the runner doesn't restart the review on its own: the orchestrator either has it rerun on the new head, where the reviewer reads the commits since its last record, or carries the record with a reason.
 
 ## What the PR needs besides its records
 

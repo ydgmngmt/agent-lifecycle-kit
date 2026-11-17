@@ -10,3 +10,5 @@ Inputs: the evidence folder, `docs.stories`, `docs.journeys`, `docs.roadmap`, `d
 4. **Tests.** Does each added test catch a behaviour regression at the lowest reliable level, or a core or security invariant with a focused test, with red-then-green proof? Is any test a copy of existing coverage? Does each acceptance criterion have a step that decides it, and each bug found live a regression check?
 5. **What was built and why.** Write a short section for the phase record: what the phase built, the decisions behind it, and what was left out.
 6. **The sweep.** Run `update-docs` for what is stale; its PR is part of your evidence.
+
+**Fail condition:** a critical finding (a project invariant can be broken now). Everything else is a follow-up for the lead.

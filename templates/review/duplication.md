@@ -11,3 +11,5 @@ Inputs: the evidence folder (PR list, changed files, baseline growth, duplicate 
 5. **Baseline growth.** An entry may grow only with the reason its PR states (a generated file, two formats that must stay separate). A grown entry without a reason is a finding.
 
 A copy is a finding in itself: both `path:line` ranges are the evidence. After a fix, `checks.duplicates --prune` shrinks the baseline.
+
+**Fail condition:** a critical finding (a project invariant can be broken now). Everything else is a follow-up for the lead.
