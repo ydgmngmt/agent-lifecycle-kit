@@ -22,6 +22,9 @@ docs:
   testing: TESTING.md
   review_checklist: docs/review-checklist.md
   code_map: docs/agents/code-map.md       # which module owns which concept
+  stack_decisions: docs/stack-decisions.md   # which tool owns which capability (templates/review/stack-decisions.md)
+  stack_tools: docs/stack-tools.md        # each tool's functions and documentation lookups (templates/review/stack-tools.md)
+  stack_exceptions: docs/stack-exceptions.md # the deviations the owner allowed (templates/review/stack-exceptions.md)
   gate_runbook: <gate runbook>
   domain_set:                             # "update the docs", set 1 (update-docs)
     - GLOSSARY.md
@@ -64,6 +67,13 @@ ci:
   pr_checks: [<required check names>]     # an empty list is never success
   phase_workflow: <workflow file of the phase run, if CI has one>   # templates/ci/phase.yml
   enforcement: <host settings that enforce the gates, or none (by convention only)>
+  required_checks: verify-pr pr-body      # CI job names the default branch requires; lc-gate protect sets them
+  # verify-pr: templates/ci/pr.yml (the pr profile and the phase record); pr-body: templates/ci/pr-body.yml
+
+pr_body:                                  # the record a PR body carries, checked by CI's pr-body job
+  heading: Tool fit                       # the body's section: ## Tool fit
+  if: mechanism                           # only when the diff touches paths.mechanism
+  shapes: docs/review/tool-fit.md#accepted-lines   # the fenced block of accepted lines under that heading
 
 gate:
   run: <gate command, intent from a file>
@@ -75,32 +85,40 @@ gate:
 #       session running the gate; the argument says what) · owner (a board question).
 # `if <key>` runs the step only when the change touches a glob under paths.<key>.
 # Keep " #" and " — " out of a step line: the reader cuts a value there.
-gate_pr_mode: observe                     # off | observe (warn) | enforce (refuse)
-gate_pr_plan: observe                     # a step ending in `plan`: edits and commits without its plan; off | observe | enforce
+# Modes: off | observe (log and tell) | observe <n> | enforce (refuse). `observe <n>` observes until n
+# PRs have merged with every record, then enforces by itself; the hook says so once. A project that
+# wants refusals from the first PR writes enforce. lc-gate enforcement shows where the count stands.
+gate_pr_mode: observe 3                   # the PR gate's records, at the gate start and at gh pr merge
+gate_pr_plan: observe 3                   # a step ending in `plan`: edits and commits without its plan
 
 paths:                                    # globs separated by spaces; ** spans directories
   flow: <globs of code a person or agent uses, e.g. apps/web/** packages/api/**>
   sensitive: <globs of the sensitive code paths>
+  mechanism: <globs where a new mechanism can land, e.g. apps/** packages/** tools/** **/package.json>
 
+# No step here is the author's own word: each record comes from the runner, a separate session, the
+# review pipeline or the owner (lc-gate enforcement flags a `here` step in gate_pr).
 gate_pr:
   commit-check: command <cmd> verify:commit
-  self-review: here code-review against the base, the brief as the spec
-  live-check: here the project's verify skill on the changed flow if flow
+  tool-fit: session docs/review/tool-fit.md if mechanism plan   # the author's plan before the first edit; a separate session checks it
   reviewer: session docs/review-checklist.md if sensitive
-  # stack-fit: here docs/review/stack-fit.md if flow plan   # `plan`: a plan recorded before the first commit (lc-gate record … plan)
-  # pipeline: command <script that passes once the review pipeline reviewed this head> after-gate   # skipped at the gate start, required at merge
+  review: command node .agents/ci/pipeline-passed.mjs review after-gate   # the review pipeline's own result for the head
+  live-check: command node .agents/ci/pipeline-passed.mjs test if flow after-gate
+  # With no review pipeline, a separate session reviews instead of the two after-gate steps:
+  # review: session docs/review/correctness.md
 
 gate_phase:
   freeze: command <script that writes the evidence folder: PR list, files, surface diff, baseline growth, quality lists>
   regression: workflow <phase workflow file>
   integration: workflow <integration workflow file>
-  built: session <review question files dir>/built-as-described.md
-  correctness: session <review question files dir>/correctness.md
-  security: session <review question files dir>/security.md
-  architecture: session <review question files dir>/architecture.md
-  duplication: session <review question files dir>/duplication.md
-  dead-code: session <review question files dir>/dead-code.md
-  docs: session <review question files dir>/docs.md
+  built: session docs/review/built-as-described.md
+  correctness: session docs/review/correctness.md
+  security: session docs/review/security.md
+  architecture: session docs/review/architecture.md
+  stack: session docs/review/stack-hunt.md
+  duplication: session docs/review/duplication.md
+  dead-code: session docs/review/dead-code.md
+  docs: session docs/review/docs.md
   findings: here one list, every finding with a disposition
   fix-retest: here blocking findings fixed, affected steps rerun or carried
   acceptance: owner
@@ -111,8 +129,10 @@ merge:
   candidate: <merge queue | update the branch from main, then wait for the required checks on the new head>
   who: orchestrator
 
-owner_approval: []                        # protected files: the human owner approves each change before merge; own PR
-protected_files: []                       # files only an owner decision may change (usually the same list)
+# The files that define the rules change only in a PR the owner reads. Globs; or a pointer `file#key`
+# to a list kept elsewhere. lc-gate enforcement names each rule file missing from it.
+owner_approval: [.agents/project.yaml, .agents/ci/**, .githooks/**, .github/workflows/**, docs/review/**, docs/review-checklist.md, docs/stack-decisions.md, docs/stack-tools.md, docs/stack-exceptions.md]
+protected_files: [.agents/project.yaml, .agents/ci/**, .githooks/**, .github/workflows/**, docs/review/**, docs/review-checklist.md, docs/stack-decisions.md, docs/stack-tools.md, docs/stack-exceptions.md]
 pinned_files: []                          # change only when a brief schedules it
 sensitive: <sensitive code paths, approved by an independent reviewer session (where they are listed, or the list)>
 

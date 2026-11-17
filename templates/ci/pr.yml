@@ -28,8 +28,13 @@ jobs:
           ref: <pinned kit commit>
           path: .lc-kit
           persist-credentials: false
-      - name: Phase record
+      # Judged by the base commit's project file (step list), so a PR can't drop a step to pass.
+      - name: Phase record (the base commit's step list)
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: .lc-kit/bin/lc-gate check phase --diff "$BASE" "$HEAD"
+        run: |
+          side=$(mktemp -d)
+          git show "$BASE:.agents/ci/from-base.sh" > "$side/from-base.sh" 2>/dev/null \
+            || cp .agents/ci/from-base.sh "$side/from-base.sh"
+          bash "$side/from-base.sh" "$BASE" "$HEAD" .lc-kit phase

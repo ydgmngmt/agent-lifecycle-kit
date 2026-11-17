@@ -1,0 +1,42 @@
+# PR body check: a pull request whose diff touches paths.<pr_body.if> carries its record under
+# pr_body.heading in its body, in the shapes pr_body.shapes lists (.agents/ci/pr-body-check.mjs).
+# The body comes from the event payload; editing it reruns the check. The check, the project file
+# and the accepted lines come from the PR's base commit (.agents/ci/from-base.sh).
+# Install: copy to .github/workflows/pr-body.yml; name its job `pr-body` in ci.required_checks.
+name: PR body
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  pr-body:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # The kit at a pinned commit, the same one the phase check uses (templates/ci/pr.yml).
+      - uses: actions/checkout@v4
+        with:
+          repository: <owner>/agent-lifecycle-kit
+          ref: <pinned kit commit>
+          path: .lc-kit
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The PR body carries its record (the base commit's check)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          side=$(mktemp -d)
+          git show "$BASE:.agents/ci/from-base.sh" > "$side/from-base.sh" 2>/dev/null \
+            || cp .agents/ci/from-base.sh "$side/from-base.sh"
+          bash "$side/from-base.sh" "$BASE" "$HEAD" .lc-kit pr-body

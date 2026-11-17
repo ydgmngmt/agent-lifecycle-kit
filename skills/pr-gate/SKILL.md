@@ -9,7 +9,7 @@ The steps are the project's `gate_pr:` block; `paths:` says which files make a s
 
 ## Plan from the tools
 
-Where a step line in `gate_pr:` ends in `plan` (say `stack-fit: here docs/review/stack-fit.md plan`), the first act on the PR, before any code, is the plan. Read the project's list of chosen tools (the brief's **Stack fit**), open their documentation, and write one line per piece of work: "I will call `<function>` (`<docs page>`) for `<what>`". Only what no tool covers is your own code, with the reason. Record it before the first commit: `lc-gate record pr <branch> <step> plan --evidence <file>`; after the first commit it is refused. After coding, complete each line with the `file:line` of the call and record the step itself with that file. A branch that had commits before the gate saw it gets `plan na --reason …` from the orchestrator. Under `gate_pr_plan: enforce` the hook refuses an edit or a commit of a file the step applies to until the plan is recorded, and refuses `git commit --no-verify`; write the plan outside the repository or under `.agents/`, which the check ignores.
+Where a step line in `gate_pr:` ends in `plan` (say `tool-fit: session docs/review/tool-fit.md if mechanism plan`), the first act on the PR, before any code, is the plan. Read the project's list of chosen tools (`docs.stack_tools`, the brief's **Stack fit**), open their documentation, and write one line per piece of work in the shapes the step's question file accepts: "I will call `<function>` (`<docs page>`) for `<what>`". Only what no tool covers is your own code, with the reason. Record it before the first commit: `lc-gate record pr <branch> <step> plan --evidence <file>`; after the first commit it is refused. After coding, complete each line with the `file:line` of the call and copy the lines under the PR body's `pr_body.heading`, which CI's `pr-body` check reads. The step itself is recorded by someone else: for a `session` step, the session the runner starts checks your plan against the diff. A branch that had commits before the gate saw it gets `plan na --reason …` from the orchestrator. Under `gate_pr_plan: enforce` the hook refuses an edit or a commit of a file the step applies to until the plan is recorded, and refuses `git commit --no-verify`; write the plan outside the repository or under `.agents/`, which the check ignores.
 
 ## Steps after the review pipeline
 
@@ -21,7 +21,7 @@ Write what you did and saw to `<handoff_dir>/gates/pr/<branch>/evidence/<step>.m
 
 ## Self-review
 
-Invoke `code-review` against the base, with the brief as the spec. Fix what it finds in scope; rewrite the rest into [finding.md](../lifecycle/finding.md) for the report. The evidence is the finding list and what you fixed.
+Your own check before the gate starts. As a `gate_pr` step it would be the author's word on the author's work, which `lc-gate enforcement` flags; the review that gates the merge is the pipeline's or a separate session's. Invoke `code-review` against the base, with the brief as the spec. Fix what it finds in scope; rewrite the rest into [finding.md](../lifecycle/finding.md) for the report. The evidence is the finding list and what you fixed.
 
 ## Live check
 

@@ -13,7 +13,7 @@ Inputs: the evidence folder (changed files, surface diff), `docs.code_map`, `doc
 7. **Validation at entry, authorization at the effect.** Data is checked where it enters; rights are checked where the effect happens.
 8. **Interruption and recovery.** Are restarts, timeouts, cancellations and partial failures modelled as states with a way out?
 9. **Platform primitives** for platform guarantees (durability, scheduling, identity, transactions) instead of hand-built copies.
-10. **Reuse of chosen tools.** Is anything a chosen tool already owns rebuilt here (a scheduler, a lease, a queue, a validator, an HTTP client, token handling)? Does a tool take over something the project owns?
+10. **Buy/build boundary.** Does a tool take over something the project owns (`docs.stack_decisions`)? The hunt for a chosen tool rebuilt under another name is the stack hunt's session (`stack-hunt.md`), not this one.
 11. **Navigability.** Is the code map still true and complete? Does a package's entry show what it offers?
 12. **Safe to refactor.** Do tests reach a package through its public interface?
 13. **Consistency.** One way to page, to change state, to report an error.

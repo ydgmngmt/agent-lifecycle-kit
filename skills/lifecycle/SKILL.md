@@ -32,7 +32,8 @@ A gate is a step list the project declares: `gate_pr:` and `gate_phase:` in `.ag
 
 - `lc-gate run <pr|phase> <id>`: does the next thing for each step without a record. Rerun to advance.
 - `lc-gate status <gate> <id>`: one row per step. Read it before saying anything about a gate.
-- `gate_pr_mode` (`off`, `observe`, `enforce`) says whether a missing PR record only warns or refuses.
+- `gate_pr_mode` and `gate_pr_plan` (`off`, `observe`, `observe <n>`, `enforce`) say whether a missing PR record or plan only warns or refuses; `observe <n>` enforces once n PRs have merged with every record.
+- `lc-gate enforcement`: what refuses without each step, layer by layer, and whether each layer is on. Read it before saying a gate is binding.
 
 ## Roles
 

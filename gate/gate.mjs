@@ -16,6 +16,13 @@
 //                       no plan record (gate_pr_plan: enforce); the git pre-commit hook and the edit hook
 //   lc-gate hook        the PreToolUse hook (hooks/hooks.json): the PR gate at its start and at merge;
 //                       the plan on every Edit/Write and git commit, and no --no-verify while it applies
+//   lc-gate enforcement [--strict] [--md]
+//                       what makes each gate step binding here, layer by layer, and whether each is on
+//   lc-gate protect [--yes]   branch protection on the default branch from ci.required_checks
+//                       (gate/enforcement.mjs)
+//
+// gate_pr_mode and gate_pr_plan are off, observe, enforce, or `observe <n>`: enforce once <n> PRs have
+// merged with every record. The hook marks each merge it lets through: gates/pr/<id>/merged.json.
 //
 // Step kinds: command (runs in the repo at the candidate, records its exit), workflow (dispatches
 // the GitHub workflow with -f candidate=<sha>, records the run whose title holds the candidate),
@@ -45,16 +52,17 @@ import { basename, dirname, extname, join, posix, relative, resolve } from 'node
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, parseProject } from '../board/config.mjs';
+import { enforcement, protect } from './enforcement.mjs';
 
 export const KINDS = ['command', 'workflow', 'session', 'here', 'owner'];
 const STATUS = ['pass', 'fail', 'na'];
 const PLANNED_KINDS = ['here', 'session']; // the kinds a session does, so the kinds that can plan first
-const KIT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+export const KIT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const COMMAND_TIMEOUT = 3_600_000; // a command step that runs longer is recorded as FAIL
 const GH_TIMEOUT = 60_000;
 
-class GateError extends Error {}
-const die = (msg) => {
+export class GateError extends Error {}
+export const die = (msg) => {
   throw new GateError(msg);
 };
 
@@ -156,10 +164,10 @@ export function prCurrent(repo, head, main = mainRef(repo)) {
 
 // --- state -------------------------------------------------------------------------------------
 
-const gatesRoot = (cfg) => join(cfg.handoffDir || join(cfg.repo, '.agents'), 'gates');
+export const gatesRoot = (cfg) => join(cfg.handoffDir || join(cfg.repo, '.agents'), 'gates');
 export const gateDir = (cfg, gate, id) => join(gatesRoot(cfg), gate, id);
 const readJson = (file, fallback) => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : fallback);
-const writeJson = (file, value) => {
+export const writeJson = (file, value) => {
   mkdirSync(join(file, '..'), { recursive: true });
   writeFileSync(`${file}.${process.pid}.tmp`, JSON.stringify(value, null, 2) + '\n');
   renameSync(`${file}.${process.pid}.tmp`, file);
@@ -345,7 +353,7 @@ function checkGate(repo, [gate, id], flags) {
 const verify = (repo, rev) => git(repo, 'rev-parse', '--verify', `${rev}^{commit}`);
 const mainRef = (repo) => (exec('git', ['-C', repo, 'rev-parse', '--verify', '-q', 'origin/HEAD'], { ok: true }).status === 0 ? 'origin/HEAD' : 'main');
 // A glob ending in / is the whole directory.
-const globRe = (glob) =>
+export const globRe = (glob) =>
   new RegExp(`^${glob.replace(/\/$/, '/**').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\/?|\*|\?/g, (m) => (m === '?' ? '[^/]' : m === '*' ? '[^/]*' : '.*'))}$`);
 // Whether any of `files` (repo-relative) is under a glob of paths.<key>.
 const matchesPaths = (conf, key, files) => {
@@ -725,7 +733,41 @@ export function gateRows(repo) {
 
 // --- the plan, before the work -----------------------------------------------------------------
 
-const PLAN_MODES = ['off', 'observe', 'enforce'];
+// --- modes -------------------------------------------------------------------------------------
+
+// gate_pr_mode and gate_pr_plan: off, observe (the default), enforce, or `observe <n>`: observe until
+// <n> pull requests have merged with every record (the merge hook's merged.json marks), then enforce
+// without anyone editing the file. { mode: the one in effect, value, count, n, fresh }; `fresh`: the
+// switch has happened and the hook has not said so yet (<gates>/<key>.enforcing marks that it did).
+export function gateMode(cfg, key) {
+  const value = cfg.conf[key] || 'observe';
+  const m = value.match(/^(off|observe|enforce)(?:\s+([1-9]\d*))?$/);
+  if (!m || (m[2] && m[1] !== 'observe')) die(`${key} is "${value}"; it must be off, observe, observe <n> or enforce`);
+  if (!m[2]) return { key, value, mode: m[1] };
+  const n = Number(m[2]);
+  const count = mergedComplete(cfg);
+  if (count < n) return { key, value, mode: 'observe', count, n };
+  return { key, value, mode: 'enforce', count, n, fresh: !existsSync(join(gatesRoot(cfg), `${key}.enforcing`)) };
+}
+
+// How a mode stands, in words: enforce, observe, off, "observing, 2 of 3", or the ended count.
+export const modeText = (m) =>
+  !m.n ? m.mode : m.mode === 'observe' ? `observing, ${m.count} of ${m.n}` : `enforce (${m.value} ended: ${m.count} merged with every record)`;
+
+// The once-only line at the switch from `observe <n>` to enforce; writes the mark so it isn't said again.
+function announce(cfg, m) {
+  if (!m.fresh) return '';
+  writeJson(join(gatesRoot(cfg), `${m.key}.enforcing`), { at: new Date().toISOString(), count: m.count, n: m.n });
+  return `lc-gate: ${m.key} was "${m.value}", and ${m.count} pull request(s) have merged with every record, so it enforces from now on: refusals are now real. (Said once.)`;
+}
+
+// The PR gates whose merge the hook let through with every record (merged.json, complete).
+function mergedComplete(cfg) {
+  const root = join(gatesRoot(cfg), 'pr');
+  if (!existsSync(root)) return 0;
+  return readdirSync(root, { recursive: true }).filter((f) => basename(String(f)) === 'merged.json' && readJson(join(root, String(f)), {}).complete === true).length;
+}
+
 const FAST = 10_000; // the plan check runs on every edit: a git call that takes longer has hung
 const fastGit = (repo, ...args) => exec('git', ['-C', repo, ...args], { timeout: FAST, ok: true });
 
@@ -768,8 +810,8 @@ function repoPath(repo, file) {
 export function planState(repo, { files = [], staged = false, pending = false } = {}) {
   if (!existsSync(join(repo, '.agents/project.yaml'))) return null;
   const cfg = loadConfig(repo);
-  const mode = cfg.conf.gate_pr_plan || 'observe';
-  if (!PLAN_MODES.includes(mode)) die(`gate_pr_plan is "${mode}"; it must be ${PLAN_MODES.join(', ')}`);
+  const modeState = gateMode(cfg, 'gate_pr_plan');
+  const { mode } = modeState;
   if (mode === 'off') return null;
   const planned = parseSteps(cfg.conf, 'pr').filter((s) => s.plan);
   if (!planned.length) return null;
@@ -782,7 +824,7 @@ export function planState(repo, { files = [], staged = false, pending = false } 
   const id = branchId(branch);
   const records = readRecords(gateDir(cfg, 'pr', id));
   const missing = applies.filter((s) => planProblems(s, records[`${s.id}.plan`]).length);
-  const st = { cfg, mode, branch, applies, missing, files: rel, message: '' };
+  const st = { cfg, mode, modeState, branch, applies, missing, files: rel, message: '' };
   if (!missing.length) return st;
   let commits = 0;
   try {
@@ -964,6 +1006,8 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
       if (!repo) continue;
       const st = planState(repo, p.file ? { files: [p.file] } : { pending: true });
       if (!st) continue;
+      const said = announce(st.cfg, st.modeState);
+      if (said) told.push(said);
       const problems = st.missing.length ? [st.message] : [];
       if (p.noVerify) problems.push(`git commit --no-verify (-n) skips the pre-commit plan check, and step(s) ${st.applies.map((s) => s.id).join(', ')} apply to this commit: commit without it`);
       if (!problems.length) continue;
@@ -990,11 +1034,13 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
       const cfg = loadConfig(repo);
       mkdirSync(gatesRoot(cfg), { recursive: true });
       log = join(gatesRoot(cfg), 'observe.log');
-      const mode = cfg.conf.gate_pr_mode || 'observe';
+      const modeState = gateMode(cfg, 'gate_pr_mode');
+      const { mode } = modeState;
       if (mode === 'off') continue;
-      if (mode !== 'observe' && mode !== 'enforce') die(`gate_pr_mode is "${mode}"; it must be off, observe or enforce`);
       const steps = parseSteps(cfg.conf, 'pr');
       if (!steps.length) continue;
+      const said = announce(cfg, modeState);
+      if (said) told.push(said);
       let branch;
       let head;
       if (p.point === 'merge') {
@@ -1009,6 +1055,11 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
       const id = branchId(branch);
       // At the gate start the after-gate steps can't hold yet: the pipeline being started satisfies them.
       const missing = check(steps, readRecords(gateDir(cfg, 'pr', id)), head, prCurrent(repo, head), { start: p.point === 'gate start' });
+      // The gate's own record of a merge it let through, complete or not: `observe <n>` counts the
+      // complete ones. A merge refused here never happens, so it leaves no mark.
+      if (p.point === 'merge' && (!missing.length || mode !== 'enforce')) {
+        writeJson(join(gateDir(cfg, 'pr', id), 'merged.json'), { branch, head, at: new Date().toISOString(), complete: !missing.length, ...(missing.length ? { missing } : {}) });
+      }
       if (!missing.length) continue;
       const what = `the PR gate for ${branch} at ${head.slice(0, 12)} does not hold:\n  ${missing.join('\n  ')}\nRun lc-gate run pr ${id}, then record each step.`;
       note({ mode, branch, head, missing, ...(mode === 'enforce' ? { refused: true } : {}) });
@@ -1033,7 +1084,7 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
 
 // --- main --------------------------------------------------------------------------------------
 
-const BOOLEAN = new Set(['carry', 'write', 'trailer', 'staged', 'files']);
+const BOOLEAN = new Set(['carry', 'write', 'trailer', 'staged', 'files', 'strict', 'md', 'yes']);
 function parseArgs(argv) {
   const pos = [];
   const flags = {};
@@ -1051,8 +1102,8 @@ export async function main(argv, cwd = process.cwd()) {
   const [cmd, ...rest] = argv;
   const repo = exec('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { ok: true }).stdout.trim() || cwd;
   const { pos, flags } = parseArgs(rest);
-  const commands = { run, record, status, hook, 'plan-check': (r, p, f) => planCheck(r, p, f, cwd), check: (r, p, f) => (f.diff ? checkPhaseDiff(r, f.diff, p[1]) : checkGate(r, p, f)) };
-  if (!commands[cmd]) die(`usage: lc-gate run|record|status|check|plan-check|hook …; see the top of gate/gate.mjs`);
+  const commands = { run, record, status, hook, enforcement, protect, 'plan-check': (r, p, f) => planCheck(r, p, f, cwd), check: (r, p, f) => (f.diff ? checkPhaseDiff(r, f.diff, p[1]) : checkGate(r, p, f)) };
+  if (!commands[cmd]) die(`usage: lc-gate run|record|status|check|plan-check|hook|enforcement|protect …; see the top of gate/gate.mjs`);
   return (await commands[cmd](repo, pos, flags)) ?? 0;
 }
 
