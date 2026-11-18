@@ -302,14 +302,16 @@ test('the project template: modes observe 3, no here step in gate_pr, the review
 });
 
 // Every PR is reviewed against the checklist, by kind of diff: a prose-only diff included.
-test('the project template: the checklist reviews every PR, and its first Docs item fails a false statement', async () => {
+test('the project template: the checklist reviews every PR against its brief first, and its first Docs item fails a false statement', async () => {
   const { parseProject } = await import('../board/config.mjs');
   const { parseSteps, questions } = await import('./gate.mjs');
   const conf = parseProject(readFileSync(join(KIT, 'templates/project.yaml'), 'utf8'));
   const pr = parseSteps(conf, 'pr');
   assert.deepEqual(pr.find((s) => s.id === 'reviewer'), { id: 'reviewer', kind: 'session', arg: conf['docs.review_checklist'], if: null });
   assert.deepEqual(pr.filter((s) => /correctness/.test(s.arg)), []);
-  assert.match(questions(readFileSync(join(KIT, 'templates/review/checklist.md'), 'utf8'))[0], /^\(must-fix\) Is every statement the diff makes true/);
+  const qs = questions(readFileSync(join(KIT, 'templates/review/checklist.md'), 'utf8'));
+  assert.match(qs[0], /^\(P2\) Does the diff do everything its brief's "Done when" lines say/);
+  assert.match(qs[1], /^\(P2\) Is every statement the diff makes true/);
 });
 
 test('enforcement: the checklist review must run on every PR', () => {

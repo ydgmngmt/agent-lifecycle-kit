@@ -5,19 +5,26 @@ description: Use when you are a gate session (spawned by `lc-gate run` for one `
 
 # Review: one gate session, one question file
 
-Read-only: fix nothing. Write only your findings file, and a live session's screenshots, traces and logs into the evidence folder. Don't read other gate sessions' findings.
+Read-only: write only your findings file, and a live session's screenshots, traces and logs into the evidence folder. Don't read other gate sessions' findings.
 
-1. **Questions.** `lc-gate questions <question file>` lists them as Q1, Q2, …: the file's top-level numbered and bulleted items. Read the whole file; it names the inputs and the base skills to invoke (`codebase-design` or `domain-modeling` for vocabulary; `code-review` against the base as a first pass, its output rewritten into the finding format). A question file that answers by kind of diff (the checklist: prose only, rules only, or all) says which rows apply; the others are `no` (the kind) and `n/a`. A rules-only diff is one round: a way around a rule is a comment, never must-fix.
-2. **Code** at the candidate, in the worktree your brief names, else your own detached worktree (`git worktree add --detach <dir> <candidate>`) or with `git show` and `git diff <base> <candidate>`; never another session's worktree. Start from the evidence folder. Scope: the whole diff, or every file the phase touched. Prove a suspected sequence with `diagnosing-bugs`, else mark it needs-check.
-3. **Answer per item.** The findings file opens with one row per question. A question with no row fails the step: `lc-gate record` refuses the file.
+1. **Questions.** `lc-gate questions <question file>` lists them as Q1, Q2, …: the file's top-level numbered and bulleted items. Read the whole file; it names the inputs and the base skills to invoke (`codebase-design` or `domain-modeling` for vocabulary; `code-review` against the base as a first pass, with the PR's brief, else its body, as the spec, its output rewritten into the finding format). A question file that answers by kind of diff says which rows apply; the others are `no` (the kind) and `n/a`. A rules-only diff is one round: a way around a rule is P3.
+2. **Code** at the candidate, in the worktree your brief names, else your own detached worktree (`git worktree add --detach <dir> <candidate>`) or with `git show` and `git diff <base> <candidate>`; never another session's worktree. Start from the evidence folder. Scope: the whole diff, or every file the phase touched.
+3. **Depth.** Read every changed file in full, and the callers of what it changes. Trace one concrete input or sequence through each changed function; prove a suspected sequence with `diagnosing-bugs`, else mark it needs-check. No time or length budget; report every P1, P2 and P3 you can substantiate.
+4. **After a fix** (the brief's scope says so): check that each earlier P1 and P2 is resolved and that the fix's own lines add none. Raise nothing else, unless a P1 or P2 with its evidence. Every question keeps a row: a resolved one is `sound`, one the fix doesn't touch keeps its verdict.
+5. **Answer per item.** The findings file opens with one row per question. A question with no row fails the step: `lc-gate record` refuses the file.
 
    | Q | Question | Applies | Checked | Verdict |
    | --- | --- | --- | --- | --- |
-   | Q1 | Types at boundaries | yes | src/api/order.ts:42, src/db/order.ts:10 | must-fix: F1 |
+   | Q1 | Types at boundaries | yes | src/api/order.ts:42, src/db/order.ts:10 | P2: F1 |
    | Q2 | Effects | no | the diff has no outside call | n/a |
 
-   Applies is yes or no. A yes names each `path:line` you read for it; a no says why. Verdict: `sound`, `comment`, `must-fix` (naming its findings) or `n/a`.
-4. **Severity.** An item tagged `(must-fix)` or `(comment)` carries its own. Otherwise a finding is must-fix when a project invariant can be broken now or the question file's fail condition is met, and comment when not. A defect is never "sound".
-5. **Findings** follow the table, each in [finding.md](../lifecycle/finding.md). Invent nothing; a clean result is valid.
-6. **Record** with the brief's line: `fail` when any row is must-fix, else `pass`, however many comments. A pass with a must-fix row is refused.
-7. **Send** a critical finding to the lead at once; the file to the implementer and orchestrator for a PR, the lead for a phase. Then stop.
+   Applies is yes or no. A yes names each `path:line` you read for it; a no says why. Verdict: `sound`, `P1`, `P2` or `P3` (naming its findings) or `n/a`; a P4 is a note in the row.
+6. **Severity** says how serious, never who acts:
+   - **P1:** wrong at merge and it harms: a bug, a regression, lost data, a broken security invariant.
+   - **P2:** wrong against the intent, the brief, a written decision or the checklist, in a way later work builds on.
+   - **P3:** real but small. **P4:** style, a possible improvement, an unlikely case.
+
+   Every P1 and P2 names `path:line` and the case that fails. An item's tag is its findings' level unless P1; an older `(must-fix)` is P2, `(comment)` P3. Ask the owner only for a decision on product meaning, scope, access or spend the docs don't settle. A defect is never "sound".
+7. **Findings** follow the table, each in [finding.md](../lifecycle/finding.md). Invent nothing; a clean result is valid.
+8. **Record** with the brief's line: `fail` when any row is P1 or P2, else `pass`, however many P3; `lc-gate record` refuses a pass with one.
+9. **Send** a P1 to the lead at once; the file to the implementer and orchestrator for a PR, the lead for a phase. Then stop.

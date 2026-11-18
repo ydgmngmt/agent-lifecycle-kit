@@ -47,3 +47,9 @@ After any upgrade, rerun the `bootstrap` skill: it finds what is missing and wal
 - The lead may record an `owner` step N/A with a reason (a scratch or dry run); the phase record states that acceptance was not given.
 - `lc-spawn` sends its answer to the folder-trust prompt again each second while the prompt shows: keys sent as it is first drawn are dropped.
 - No CI host: keep `ci.enforcement: none`; `lc-gate enforcement` names it instead of asking for `ci.required_checks`.
+
+## From 1.5 to 1.6
+
+- **Severity P1 to P4, apart from who acts.** P1: wrong at merge and it harms; P2: wrong against the intent, the brief, a written decision or the checklist; P3: real but small; P4: a note in the row. A verdict is `sound`, `P1`, `P2`, `P3` or `n/a`; `lc-gate record` refuses a pass with a P1 or P2 row. A row still `must-fix` counts as P2 and `comment` stays valid, so older question files keep working; recopy `templates/review/checklist.md` to retag your items `(P2)` and `(P3)`.
+- **The review judges the PR against its brief.** The checklist's first item asks whether the diff does everything its brief's "Done when" lines say, and nothing outside its scope: add it to `docs.review_checklist`. The PR gate's session brief names the implementer's brief, found through the board's `spawned.tsv` by the branch's worktree, so start implementers with `lc-spawn`; with none known, the PR body is the brief. Briefs end with their scope and "Done when" lines (`templates/brief.md`).
+- **Deep first, narrow after a fix.** A session step that failed at an earlier candidate the new one descends from gets a review of the fix only: the brief names the earlier findings and the range. After two such reviews still failing, `lc-gate run` starts no further session; the lead decides (N/A with a reason, or a decision on the board). The rounds are kept in `rounds.json` in the gate's state folder.

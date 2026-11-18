@@ -28,7 +28,9 @@
 //
 // Step kinds: command (runs in the repo at the candidate, records its exit), workflow (dispatches
 // the GitHub workflow with -f candidate=<sha>, records the run whose title holds the candidate),
-// session (writes a brief from templates/gate-brief.md and lc-spawns it), here (the session
+// session (writes a brief from templates/gate-brief.md and lc-spawns it: a review after a fix when the
+// step failed at an earlier candidate this one descends from, none after two of those still fail; a PR's
+// brief names the implementer's brief from the board's spawned.tsv), here (the session
 // running the gate does it and records), owner (asks on the board; the answer is the record, or the
 // lead's N/A in a scratch or dry run, which the phase record states).
 // A `session` or `workflow` step starts at once; a command, here or owner step waits until every
@@ -164,7 +166,10 @@ export function questions(text) {
   return out;
 }
 
-const VERDICTS = ['sound', 'comment', 'must-fix', 'n/a'];
+// P1 to P3 name findings (P4 is a line in the row, not a finding); comment and must-fix are the levels
+// of question files before 1.6: must-fix counts as P2, so a P1, P2 or must-fix row fails the step.
+const VERDICTS = ['sound', 'p1', 'p2', 'p3', 'comment', 'must-fix', 'n/a'];
+const FAILS = /^(p1|p2|must-fix)\b/i;
 // A findings file's rows `| Q<n> | question | applies | checked | verdict |`, by n, as cells.
 function answerRows(findings) {
   const rows = new Map();
@@ -294,8 +299,9 @@ function record(repo, [gate, id, step, status, planStatus], flags) {
       const qs = questions(questionFile(g, s, sha));
       const problems = answerProblems(qs, text);
       if (problems.length) die(`${findings} answers each question of ${s.arg} in a row (the review skill):\n  ${problems.join('\n  ')}`);
-      const mustFix = [...answerRows(text)].filter(([n, c]) => n <= qs.length && /^must-fix/i.test(c[4])).map(([n]) => `Q${n}`);
-      if (status === 'pass' && mustFix.length) die(`${mustFix.join(', ')} ${mustFix.length > 1 ? 'are' : 'is'} must-fix: record fail`);
+      const failing = [...answerRows(text)].filter(([n, c]) => n <= qs.length && FAILS.test(c[4]));
+      const word = (c) => (/^must-fix/i.test(c[4]) ? 'must-fix' : 'P1 or P2');
+      if (status === 'pass' && failing.length) die(`${failing.map(([n]) => `Q${n}`).join(', ')} ${failing.length > 1 ? 'are' : 'is'} ${word(failing[0][1])}: record fail`);
     }
   }
   const old = g.records[step];
@@ -524,6 +530,18 @@ async function run(repo, [gate, idArg], flags) {
   return 0;
 }
 
+// The brief lc-spawn last started a session on in the PR branch's worktree (the board's spawned.tsv:
+// name, brief, workdir), not a gate session's; null when none is known.
+function prBrief(ctx) {
+  const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+  const dirs = exec('git', ['-C', ctx.repo, 'worktree', 'list', '--porcelain'], { ok: true }).stdout.split('\n\n')
+    .filter((b) => b.split('\n').includes(`branch refs/heads/${ctx.id}`)).map((b) => real(b.match(/^worktree (.*)$/m)?.[1] ?? ''));
+  const tsv = join(ctx.cfg.dataDir, 'spawned.tsv');
+  const rows = existsSync(tsv) ? readFileSync(tsv, 'utf8').split('\n').map((l) => l.split('\t')) : [];
+  const hit = rows.filter(([name, brief, dir]) => dir && !name.startsWith('gate-') && dirs.includes(real(dir)) && existsSync(brief)).at(-1);
+  return hit?.[1] ?? null;
+}
+
 const sessionName = (ctx, s) => `gate-${ctx.id}-${s.id}`.replace(/[^\w.-]/g, '-');
 
 // The id of lc-spawn's tmux window of this name, else null.
@@ -659,16 +677,33 @@ const STEP = {
       const idle = idleNote(ctx, s, window);
       return say(ctx, s, `session ${name} is running; waiting for its record (lc-close ${name} to stop it)${idle && `\n    ${name} ${idle}`}`);
     }
+    // A review after a fix: the step failed at an earlier candidate this one descends from. After two
+    // such reviews with a P1 or P2 still open, no further session: the lead decides.
+    const old = ctx.records[s.id];
+    const earlier = old?.status === 'fail' && old.sha !== ctx.sha && exec('git', ['-C', ctx.repo, 'merge-base', '--is-ancestor', old.sha, ctx.sha], { ok: true }).status === 0 ? old : null;
+    const roundsFile = join(ctx.dir, 'rounds.json');
+    const rounds = readJson(roundsFile, {});
+    const round = earlier ? (rounds[s.id]?.[earlier.sha] ?? 0) + 1 : 0;
+    if (round > 2) return say(ctx, s, `a P1 or P2 is still open after two reviews after a fix (${earlier.evidence}): no further session; the lead decides (lc-gate record ${ctx.gate} ${ctx.id} ${s.id} na --reason …, or a decision on the board)`);
     if (existsSync(brief)) return say(ctx, s, `session ${name} ended without a record; start it again with --rerun ${s.id}`);
     if (ctx.parallel && ctx.running >= ctx.parallel) return say(ctx, s, `waits: ${ctx.running} session(s) running, sessions.gate_parallel is ${ctx.parallel}`);
     const findings = join(ctx.dir, 'findings', `${s.id}.md`);
     mkdirSync(dirname(findings), { recursive: true });
     mkdirSync(dirname(brief), { recursive: true });
     // Findings of an earlier candidate are kept beside, so the new session starts from an empty file.
-    if (existsSync(findings)) renameSync(findings, join(ctx.dir, 'findings', `${s.id}.before-${ctx.sha.slice(0, 12)}.md`));
+    const kept = join(ctx.dir, 'findings', `${s.id}.before-${ctx.sha.slice(0, 12)}.md`);
+    if (existsSync(findings)) renameSync(findings, kept);
+    let scope = 'a full review of the whole diff, as deep as the review skill asks.';
+    if (earlier) {
+      const was = earlier.evidence === findings ? kept : earlier.evidence;
+      scope = `a review after a fix. The step failed at \`${earlier.sha.slice(0, 12)}\` with the findings in \`${was}\`; the fix is \`git diff ${earlier.sha} ${ctx.sha}\`. Check that each of its P1 and P2 is resolved at the candidate and that the fix's own lines add none; raise nothing else, unless a P1 or P2 with its evidence.`;
+    }
+    writeJson(roundsFile, { ...rounds, [s.id]: { ...rounds[s.id], [ctx.sha]: round } });
+    const spec = ctx.gate !== 'pr' ? 'The spec: the inputs the question file names.'
+      : ((b) => (b ? `The PR's brief: \`${b}\`; judge the change against it.` : "The PR's brief: none known; judge the change against the PR body."))(prBrief(ctx));
     const setup = ctx.cfg.conf['sessions.gate_setup'];
     const checkout = setup ? `read in the gate's worktree \`${gateWorktree(ctx, setup)}\`, set up by \`${setup}\`: run checks there, edit nothing` : 'read in your own detached worktree';
-    const values = { gate: ctx.gate, id: ctx.id, step: s.id, session: name, question: s.arg, base: ctx.base, candidate: ctx.sha, checkout, evidence: join(ctx.dir, 'evidence'), findings };
+    const values = { gate: ctx.gate, id: ctx.id, step: s.id, session: name, question: s.arg, base: ctx.base, candidate: ctx.sha, checkout, evidence: join(ctx.dir, 'evidence'), findings, scope, spec };
     writeFileSync(brief, readFileSync(join(KIT, 'templates/gate-brief.md'), 'utf8').replace(/\{\{(\w+)\}\}/g, (_, k) => values[k]));
     // The model floor: a gate session runs on the gate's model and effort, never on the lead's.
     const conf = ctx.cfg.conf;

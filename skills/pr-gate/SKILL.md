@@ -5,8 +5,7 @@ description: Use when a pull request's work is committed and must pass its gate 
 
 # PR gate
 
-The steps are the project's `gate_pr:` block; `paths:` says which files make an `if <key>` step apply. Run `lc-gate run pr <branch>` (no id: the current branch) after each step until `lc-gate check pr <branch>` holds. The runner runs `command` steps and spawns `session` steps; a `here` step is yours. Only the runner records a `command` step's pass (`--rerun <step>` runs it again), and only the session spawned for a `session` step records its pass.
-
+The steps are the project's `gate_pr:` block; `paths:` says which files make an `if <key>` step apply. Run `lc-gate run pr <branch>` (no id: the current branch) after each step until `lc-gate check pr <branch>` holds. The runner runs `command` steps and spawns `session` steps; a `here` step is yours.
 ## Plan from the tools
 
 Where a `gate_pr:` step ends in `plan`, the plan comes before any code. From `docs.stack_tools`, the brief's **Stack fit** and each touched tool's docs (its **Look up** line), write one line per piece of work in the shapes the step's question file accepts: "I will call `<function>` (`<docs page>`) for `<what>`"; own code only where no tool covers it, with the reason. Write it outside the repository or under `.agents/`, and record it before the first commit: `lc-gate record pr <branch> <step> plan --evidence <file>` (refused after). Once coded, complete each line with the call's `file:line`, add a line for any mechanism the plan missed, and copy the lines under the PR body's `pr_body.heading` for CI's `pr-body` check. A branch with commits before the gate saw it gets `plan na --reason …` from the orchestrator. Under `gate_pr_plan: enforce` the hook refuses an edit or commit of a file the step covers until the plan is recorded, and refuses `git commit --no-verify`.
@@ -36,7 +35,7 @@ With no flow to show: for docs, every link resolves and each claim is true at th
 
 ## Reviewer
 
-A `session` step with the project's checklist (`docs.review_checklist`) on every PR, by kind of diff, never the implementer. It records `fail` on a must-fix finding. Commits after its pass make it stale: the orchestrator reruns it (`lc-close <name>`, then `lc-gate run pr <branch> --rerun <step>`) or carries it with a reason.
+A `session` step with the project's checklist (`docs.review_checklist`) on every PR, by kind of diff, never the implementer; its brief names the PR's brief, which it judges the diff against. It records `fail` on a P1 or P2 finding. After a fail it reviews only the fix; after two such reviews still failing, the orchestrator decides. Commits after its pass make it stale: the orchestrator reruns it (`lc-close <name>`, then `lc-gate run pr <branch> --rerun <step>`) or carries it with a reason.
 
 ## Besides the records
 

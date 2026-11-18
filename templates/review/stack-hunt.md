@@ -11,4 +11,4 @@ Inputs: the evidence folder, `docs.stack_decisions`, `docs.stack_tools`, `docs.s
 3. **Across PRs:** a mechanism split over several PRs, each piece too small for its own record.
 4. **Owner.** For each mechanism found: which stack decision owns it, and which tool function replaces it?
 
-A finding names the mechanism at `path:line`, its decision and the replacing function. **Fail condition:** a mechanism no exceptions row covers; one a row covers is a comment naming the row.
+A finding names the mechanism at `path:line`, its decision and the replacing function. **Fail condition:** a mechanism no exceptions row covers; one a row covers is P3, naming the row.

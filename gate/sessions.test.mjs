@@ -219,3 +219,72 @@ test('a planned step whose paths the diff misses is N/A, with no word about its 
   assert.match(r.stdout, /fit\s+session\s+N\/A \(no file changed/, r.stdout + r.stderr);
   assert.doesNotMatch(r.stdout, /plan/);
 });
+
+// A review after a fix: a failed record at an earlier candidate this one descends from.
+const failAt = (f, sha, text = '| Q1 | Is it right? | yes | q.md:1 | P1: F1 |\n') => {
+  const dir = join(f.repo, 'state/gates/phase/x');
+  mkdirSync(join(dir, 'records'), { recursive: true });
+  writeFileSync(join(dir, 'findings/review.md'), text);
+  writeFileSync(join(dir, 'records/review.json'), JSON.stringify({ step: 'review', status: 'fail', sha, evidence: join(dir, 'findings/review.md'), by: 'gate-x-review', at: 't', spawned: true }));
+};
+const briefAt = (f) => readFileSync(join(f.repo, 'state/gates/phase/x/briefs', `review-${f.sh('git rev-parse --short=12 HEAD')}.md`), 'utf8');
+
+test('after a failed review, the next session checks the fix: the earlier findings and the range; else a full review', () => {
+  const f = fixture(SESSION);
+  f.pane('working\n');
+  f.lc('run', 'phase', 'x', '--base', 'HEAD');
+  assert.match(briefAt(f), /Scope: a full review/);
+  const c1 = f.sh('git rev-parse HEAD');
+  failAt(f, c1);
+  f.sh('git commit -q --allow-empty -m fix');
+  const r = f.lc('run', 'phase', 'x', '--candidate', 'HEAD', '--rerun', 'review');
+  assert.match(r.stdout, /started session/, r.stdout + r.stderr);
+  const b = briefAt(f);
+  assert.match(b, /Scope: a review after a fix/);
+  assert.match(b, new RegExp(`git diff ${c1} ${f.sh('git rev-parse HEAD')}`));
+  assert.match(b, new RegExp(`findings/review\\.before-${f.sh('git rev-parse --short=12 HEAD')}\\.md`));
+  // A candidate that does not descend from the failed one gets a full review.
+  failAt(f, f.sh('git rev-parse HEAD'));
+  f.sh(`git checkout -q -b side ${c1} && git commit -q --allow-empty -m other`);
+  f.lc('run', 'phase', 'x', '--candidate', 'HEAD', '--rerun', 'review');
+  assert.match(briefAt(f), /Scope: a full review/);
+});
+
+test('with a P1 or P2 still open after two reviews after a fix, run starts no further session: the lead decides', () => {
+  const f = fixture(SESSION);
+  f.pane('working\n');
+  f.lc('run', 'phase', 'x', '--base', 'HEAD');
+  for (const round of [1, 2]) {
+    failAt(f, f.sh('git rev-parse HEAD'));
+    f.sh(`git commit -q --allow-empty -m fix${round}`);
+    const r = f.lc('run', 'phase', 'x', '--candidate', 'HEAD', '--rerun', 'review');
+    assert.match(r.stdout, /started session/, `round ${round}: ${r.stdout}${r.stderr}`);
+    assert.match(briefAt(f), /review after a fix/);
+  }
+  failAt(f, f.sh('git rev-parse HEAD'));
+  f.sh('git commit -q --allow-empty -m fix3');
+  const r = f.lc('run', 'phase', 'x', '--candidate', 'HEAD', '--rerun', 'review');
+  assert.doesNotMatch(r.stdout, /started session/);
+  assert.match(r.stdout, /still open after two reviews after a fix.*the lead decides/);
+  assert.equal(f.calls().split('\n').filter((l) => l.startsWith('new-')).length, 3);
+});
+
+test("a PR's review brief names the PR's brief, found by the branch's worktree in spawned.tsv; else it says none is known", () => {
+  const f = fixture('handoff_dir: $STATE\ngate_pr:\n  reviewer: session q.md\n');
+  f.pane('working\n');
+  const wt = join(f.repo, '..', `${f.repo.split('/').at(-1)}-feat`);
+  f.sh(`git worktree add -q -b feat ${wt} && git -C ${wt} commit -q --allow-empty -m change`);
+  const prBrief = join(f.repo, 'state/briefs/feat.md');
+  mkdirSync(join(f.repo, 'state/board'), { recursive: true });
+  mkdirSync(join(f.repo, 'state/briefs'), { recursive: true });
+  writeFileSync(prBrief, '# Brief: feat\n');
+  writeFileSync(join(f.repo, 'state/board/spawned.tsv'), `other\t/elsewhere.md\t${f.repo}\nfeat\t${prBrief}\t${wt}\ngate-feat-reviewer\t/gate-brief.md\t${wt}\n`);
+  const head = f.sh(`git -C ${wt} rev-parse HEAD`);
+  const r = f.lc('run', 'pr', 'feat', '--candidate', head);
+  assert.match(r.stdout, /started session/, r.stdout + r.stderr);
+  const brief = () => readFileSync(join(f.repo, 'state/gates/pr/feat/briefs', `reviewer-${head.slice(0, 12)}.md`), 'utf8');
+  assert.match(brief(), new RegExp(`The PR's brief: \`${prBrief}\``));
+  writeFileSync(join(f.repo, 'state/board/spawned.tsv'), '');
+  f.lc('run', 'pr', 'feat', '--candidate', head, '--rerun', 'reviewer');
+  assert.match(brief(), /The PR's brief: none known; judge the change against the PR body/);
+});

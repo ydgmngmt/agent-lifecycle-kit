@@ -412,6 +412,8 @@ test('a findings file answers every question, with what it checked', () => {
   assert.match(answerProblems(qs, full.replace('src/b.js:9', 'looked at it')).join('\n'), /Q2.*path:line/);
   assert.match(answerProblems(qs, full.replace('| no |', '| maybe |')).join('\n'), /Q3.*yes or no/);
   assert.match(answerProblems(qs, full.replace('comment', 'fine')).join('\n'), /Q2.*verdict/);
+  for (const v of ['P1: F1', 'P2: F2', 'P3: F3']) assert.deepEqual(answerProblems(qs, full.replace('comment', v)), []);
+  assert.match(answerProblems(qs, full.replace('comment', 'P4')).join('\n'), /Q2.*verdict/);
 });
 
 test("a session's record is refused without a row per question, and a pass with a must-fix row", () => {
@@ -430,6 +432,14 @@ test("a session's record is refused without a row per question, and a pass with 
   writeFileSync(findings, [row(1, 'yes', 'src/a.js:3', 'must-fix'), row(2, 'yes', 'src/b.js:9', 'sound'), row(3, 'no', 'no new dependency', 'n/a')].join('\n'));
   assert.match(rec('pass').stderr, /Q1 is must-fix/);
   assert.equal(rec('fail').status, 0);
+  // P1 to P4: a pass with a P1 or P2 row is refused; a P3 is recorded and does not fail the step.
+  const rows = (v) => writeFileSync(findings, [row(1, 'yes', 'src/a.js:3', v), row(2, 'yes', 'src/b.js:9', 'sound'), row(3, 'no', 'no new dependency', 'n/a')].join('\n'));
+  rows('P1: F1');
+  assert.match(rec('pass').stderr, /Q1 is P1 or P2: record fail/);
+  rows('p2: F1');
+  assert.match(rec('pass').stderr, /Q1 is P1 or P2: record fail/);
+  rows('P3: F1');
+  assert.equal(rec('pass').status, 0);
   const listed = lc({}, 'questions', 'q.md');
   assert.match(listed.stdout, /^Q1 \*\*Types\.\*\*.*\nQ2 .*\nQ3 Who owns/);
 });

@@ -9,11 +9,13 @@ Every review writes findings in this format: each gate session (`review`), and t
 - Rule: the invariant or document line it breaks, or the existing code it should have used
 - Why it matters: the concrete consequence
 - Smallest remedy: what to change, where
-- Severity: critical (a project invariant can be broken now) | high (a defect in realistic use, or a fault later work builds on) | medium | low
+- Severity: P1 (wrong at merge and it harms) | P2 (wrong against the intent or a written decision, in a way later work builds on) | P3 (real but small); a P4 is a line, not a finding
 - Fix keeps behaviour: yes | no
 - Owner decision needed: no | yes (which)
 - Confidence: confirmed (callers traced) | likely | needs-check (what wasn't verified)
 ```
+
+A P3 is fixed when it is a few lines inside the change, else recorded; it is never alone a reason for another round.
 
 A gate session's file opens with one row per question of its question file (`review`: applies, the `path:line` it checked, the verdict), then its findings. A clean result is valid. Every finding has a `path:line`. Give no general advice, and don't invent findings to fill the list.
 
@@ -24,4 +26,4 @@ A gate session's file opens with one row per question of its question file (`rev
 - **owner:** a product meaning or rule to decide, with a proposed answer.
 - **rejected:** with one line saying why.
 
-A critical finding (a project invariant can be broken now) goes to the orchestrator at once and is fixed, or accepted by the owner, before anything else.
+A P1 goes to the orchestrator at once and is fixed, or accepted by the owner, before anything else.

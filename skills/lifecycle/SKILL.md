@@ -43,13 +43,11 @@ A fix found at any gate loops back to implementation and is retested.
 - **Gate sessions:** each started by `lc-gate run` with one question file.
 - **Board keeper:** a cheap session that keeps the board true (`board`).
 
-Status and questions go to the orchestrator. Peers message each other about shared files, lanes and findings; anything changing scope, a product rule or the plan goes to the orchestrator, who hears the outcome of every peer agreement.
+Status and questions go to the orchestrator. Peers settle shared files, lanes and findings between them and tell the orchestrator the outcome; anything changing scope, a product rule or the plan goes to the orchestrator.
 
 ## What enforces the gates
 
-Say plainly which gate the host enforces and which holds only by records; never call a gate enforced without checking the host's settings (`ci.enforcement`).
-- **Host-enforced, where the plan allows:** required status checks, "up to date with main", a merge queue, no force-push or deletion. A rule admins may bypass enforces nothing when agents use an admin's token.
-- **Recorded:** every gate step. CI runs `lc-gate check phase --diff`, so a phase can't be marked done without its record. A record shows a step ran, not that its result is right.
+Say plainly which gate the host enforces (required checks, "up to date with main", a merge queue; a rule admins may bypass enforces nothing when agents use an admin's token) and which holds only by its records; check `ci.enforcement` first. CI runs `lc-gate check phase --diff`, so a phase can't be marked done without its record. A record shows a step ran, not that its result is right.
 
 ## Which skill fires when
 

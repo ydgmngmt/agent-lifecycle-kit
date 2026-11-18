@@ -102,7 +102,7 @@ gate_pr:
   commit-check: command <cmd> verify:commit
   tool-fit: session docs/review/tool-fit.md if mechanism plan   # the author's plan before the first edit; a separate session checks it
   rules: command lc-rules check --base $LC_GATE_BASE   # .agents/rules.yaml, judged by the base's copy; no CI host needed
-  reviewer: session docs/review-checklist.md   # every PR, by kind of diff: a prose-only diff answers the Docs items
+  reviewer: session docs/review-checklist.md   # every PR, against its brief, by kind of diff; P1 or P2 fails; the review after a fix checks the fix only
   review: command node .agents/ci/pipeline-passed.mjs review after-gate   # the review pipeline's own result for the head
   live-check: command node .agents/ci/pipeline-passed.mjs test if flow after-gate
   # With no review pipeline, a separate session reviews the code instead of the two after-gate steps:

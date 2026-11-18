@@ -19,8 +19,11 @@ Read `.agents/project.yaml`, then `docs.agents`, `docs.testing` and `docs.lifecy
 ## Decisions already made
 <owner decisions and docs that settle the questions this work will raise>
 
-## Don't touch
-<files and areas outside scope; pinned files>
+## Scope
+<in: the files or areas this change may touch. Out: those it must not; pinned files>
 
 ## Verify
 <the flow to run live, its entry point and the expected result; the exit criterion this PR moves>
+
+## Done when
+<one line each, decidable from the diff or a named check: the PR's reviewer judges against these and the scope>
