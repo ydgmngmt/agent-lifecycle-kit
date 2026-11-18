@@ -15,6 +15,18 @@ The owner decides and accepts; the agents do the rest. The kit knows nothing abo
 
 One real product was built by agents that had a plan, an architecture and written principles, and they still wrote their own code beside the tools they were told to use. Put through the gates, none of those changes would merge. This is work in progress, with more red-team rounds to come: [method, cases and limits](docs/proof.md).
 
+## What it does, and why
+
+| Step | What happens | Why |
+| --- | --- | --- |
+| Product scope | The owner and an agent turn requirements into phases, each with acceptance criteria. | "Done" is written down before any code. |
+| Briefs | The orchestrator cuts a phase into small changes, one brief each. | A small change can be reviewed, and a session with one job stays on it. |
+| Implementation | One agent session per brief, in its own worktree. | Sessions do not trip over each other. |
+| PR gate | Exact rules, a check that the chosen tools are used, and an independent review. Each step leaves a record tied to the commit; no record, no merge. | An agent cannot call its own work good. |
+| Nightly | The full test run on the main branch. | Slow checks still run without holding up every change. |
+| Phase exit | Independent sessions review the whole phase against its criteria, then the owner accepts. | Some defects only show where changes meet, and a person says the phase is done. |
+| Lessons | A finding the reviews keep raising becomes an exact rule; the owner decides. | The gates get stricter with use. |
+
 ## Install
 
 **Claude Code** (plugin; skills are then named `agent-lifecycle-kit:<skill>`):
