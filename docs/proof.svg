@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 372" width="880" height="372" role="img" aria-labelledby="t d" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+<title id="t">Proof: without the kit and with it</title>
+<desc id="d">Without the kit: 14 decisions broken with no reason, 5 chosen tools never wired in, 67 forbidden imports, 5 of 5 sampled changes merged. With the kit: 0 of 5 of those changes would merge, 5 of 6 planted defects stopped at the PR gate, 6 of 6 at the Phase exit, 0 of 2 clean controls blocked.</desc>
+<style>
+.bg{fill:#fcfcfb}.card{fill:#fcfcfb;stroke:#d9d8d2}.num{fill:#0b0b0b;font-size:34px;font-weight:650}.of{fill:#52514e;font-size:17px;font-weight:500}.lab{fill:#52514e;font-size:13.5px}.head{fill:#0b0b0b;font-size:15px;font-weight:650}.sub{fill:#52514e;font-size:13.5px}.bad{fill:#d03b3b}.good{fill:#0ca30c}.ic{stroke:#fcfcfb;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+@media (prefers-color-scheme:dark){.bg{fill:#1a1a19}.card{fill:#1a1a19;stroke:#3d3c39}.num,.head{fill:#f0efec}.of,.lab,.sub{fill:#c3c2b7}.ic{stroke:#1a1a19}}
+</style>
+<rect class="bg" width="880" height="372" rx="10"/>
+<circle class="bad" cx="34" cy="34" r="10"/><path class="ic" d="M30 30l8 8M38 30l-8 8"/>
+<text class="head" x="54" y="39">Without the kit</text><text class="sub" x="176" y="39">agents with a plan, an architecture and written principles</text>
+<rect class="card" x="24" y="56" width="196" height="112" rx="8"/><text class="num" x="42" y="106">14</text><text class="lab" x="42" y="132">decisions broken,</text><text class="lab" x="42" y="150">no reason written down</text>
+<rect class="card" x="236" y="56" width="196" height="112" rx="8"/><text class="num" x="254" y="106">5</text><text class="lab" x="254" y="132">chosen tools</text><text class="lab" x="254" y="150">never wired in</text>
+<rect class="card" x="448" y="56" width="196" height="112" rx="8"/><text class="num" x="466" y="106">67</text><text class="lab" x="466" y="132">imports the</text><text class="lab" x="466" y="150">architecture forbids</text>
+<rect class="card" x="660" y="56" width="196" height="112" rx="8"/><text class="num" x="678" y="106">5<tspan class="of" dx="6">of 5</tspan></text><text class="lab" x="678" y="132">sampled bad changes</text><text class="lab" x="678" y="150">were merged</text>
+<circle class="good" cx="34" cy="212" r="10"/><path class="ic" d="M29 212l4 4 7-8"/>
+<text class="head" x="54" y="217">With the kit</text><text class="sub" x="152" y="217">the same kinds of change, put through the gates</text>
+<rect class="card" x="24" y="234" width="196" height="112" rx="8"/><text class="num" x="42" y="284">0<tspan class="of" dx="6">of 5</tspan></text><text class="lab" x="42" y="310">of those real changes</text><text class="lab" x="42" y="328">would merge</text>
+<rect class="card" x="236" y="234" width="196" height="112" rx="8"/><text class="num" x="254" y="284">5<tspan class="of" dx="6">of 6</tspan></text><text class="lab" x="254" y="310">planted defects stopped</text><text class="lab" x="254" y="328">at the PR gate</text>
+<rect class="card" x="448" y="234" width="196" height="112" rx="8"/><text class="num" x="466" y="284">6<tspan class="of" dx="6">of 6</tspan></text><text class="lab" x="466" y="310">planted defects stopped</text><text class="lab" x="466" y="328">at the Phase exit</text>
+<rect class="card" x="660" y="234" width="196" height="112" rx="8"/><text class="num" x="678" y="284">0<tspan class="of" dx="6">of 2</tspan></text><text class="lab" x="678" y="310">clean controls blocked</text><text class="lab" x="678" y="328">at the Phase exit</text>
+</svg>

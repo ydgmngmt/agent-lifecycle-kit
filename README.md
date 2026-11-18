@@ -1,8 +1,19 @@
 # agent-lifecycle-kit
 
-An agent-driven development lifecycle (ADLC) that a repository installs: a guided setup, gates that refuse a change without its records, and the tools agent sessions use to plan, build, review and merge. The kit knows nothing about any one project; each repository keeps its own values, gate steps included, in `.agents/project.yaml`.
+**Agent-driven development, with gates.** Coding agents plan, build, review and merge. Good documents alone do not keep them on course: agents given a sound plan, an architecture and written principles still drift, each change looking reasonable on its own. This kit is an agent-driven development lifecycle (ADLC) that a repository installs, and it adds the two parts that were missing:
+
+- **An orchestrator.** One lead session splits a phase of the plan into pull requests, starts an agent session for each with a short brief, and keeps a board the owner watches.
+- **Review gates.** A change lands only when independent checks show it is good code and does what the plan and the project's decisions say. Every pull request passes the project's exact rules, a check that the chosen tools are used, and an independent review. Every phase ends with independent sessions reviewing the whole, then the owner's acceptance.
+
+The owner decides and accepts; the agents do the rest. The kit knows nothing about any one project: each repository keeps its own values, gate steps included, in `.agents/project.yaml`.
 
 ![Agent-driven development lifecycle](docs/adlc.png)
+
+## Proof
+
+![Without the kit and with it](docs/proof.svg)
+
+One real product was built by agents that had a plan, an architecture and written principles, and they still wrote their own code beside the tools they were told to use. Put through the gates, none of those changes would merge. This is work in progress, with more red-team rounds to come: [method, cases and limits](docs/proof.md).
 
 ## Install
 
@@ -46,7 +57,7 @@ The skills call the [mattpocock-skills](https://github.com/mattpocock/skills) se
 - [Enforcement](docs/enforcement.md): the model, the modes, the step syntax, the commands
 - [Upgrading](docs/upgrading.md): 0.8 to 1.0, 1.0 to 1.1, 1.1 to 1.2, and 1.2 to 1.3
 - [Machine-specific pieces](docs/machine.md)
-- [Proof (in progress)](docs/proof.md)
+- [Proof](docs/proof.md): method, cases and limits
 - [The lifecycle skill](skills/lifecycle/SKILL.md): steps, roles and gates
 - [The readiness checklist](skills/bootstrap/checklist.md) and [the project file template](templates/project.yaml)
 - [License](LICENSE)
