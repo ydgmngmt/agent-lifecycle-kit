@@ -29,7 +29,8 @@
 // Step kinds: command (runs in the repo at the candidate, records its exit), workflow (dispatches
 // the GitHub workflow with -f candidate=<sha>, records the run whose title holds the candidate),
 // session (writes a brief from templates/gate-brief.md and lc-spawns it), here (the session
-// running the gate does it and records), owner (asks on the board; the answer is the record).
+// running the gate does it and records), owner (asks on the board; the answer is the record, or the
+// lead's N/A in a scratch or dry run, which the phase record states).
 // A `session` or `workflow` step starts at once; a command, here or owner step waits until every
 // step above it has a record. With `if <key>`, a diff with no file under paths.<key> is N/A.
 // The PR gate's id is its branch (branchId). The phase gate needs --base on its first run.
@@ -50,7 +51,8 @@
 // caller is the lead (`by` is LC_SESSION, else "lead"). Nobody records a command step's pass (the runner
 // does, from its exit), and only the spawned session records a session step's pass (the lead: N/A, carry).
 // A session step runs on sessions.gate_model and sessions.gate_effort (opus, xhigh), never the lead's;
-// with sessions.gate_parallel <n>, run starts a session step only while fewer than <n> are running.
+// with sessions.gate_parallel <n>, run starts a session step only while fewer than <n> are running;
+// with sessions.gate_setup, its sessions read in one worktree at the candidate, set up by it (gateWorktree).
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -275,7 +277,7 @@ function record(repo, [gate, id, step, status, planStatus], flags) {
   if (!s) die(`no step ${step} in gate_${gate}; steps: ${g.steps.map((x) => x.id).join(', ')}`);
   if (status === 'plan') return recordPlan(g, gate, id, s, planStatus ?? 'pass', flags);
   if (!STATUS.includes(status)) die(`status must be pass, fail or na, not ${status}`);
-  if (s.kind === 'owner') die(`${step} is an owner step: only the owner's answer on the board records it (lc-gate run)`);
+  if (s.kind === 'owner' && status !== 'na') die(`${step} is an owner step: only the owner's answer on the board records it (lc-gate run); the lead may record N/A with --reason (a scratch or dry run)`);
   const own = process.env.LC_GATE_STEP;
   // A spawned session names the candidate of its brief, so its record never lands on a later one.
   if (own && !flags.candidate) die('a spawned session records with --candidate <the candidate of its brief>');
@@ -453,6 +455,11 @@ async function run(repo, [gate, idArg], flags) {
     console.log(`new candidate ${sha.slice(0, 12)} (was ${g.state.candidate.slice(0, 12)}): its records are stale; each step reruns, or the lead carries it with lc-gate record … --carry --reason`);
   }
   writeJson(join(g.dir, 'gate.json'), { gate, id, candidate: sha, base });
+  // The evidence folder's git-only part, whatever the freeze step does (templates/phase-review.md).
+  const evidence = join(g.dir, 'evidence');
+  mkdirSync(evidence, { recursive: true });
+  writeFileSync(join(evidence, 'prs.txt'), exec('git', ['-C', repo, 'log', '--first-parent', '--merges', '--format=%h %s', `${base}..${sha}`]).stdout);
+  writeFileSync(join(evidence, 'files.txt'), exec('git', ['-C', repo, 'diff', '--name-only', base, sha]).stdout);
   const ctx = { ...g, repo, gate, id, sha, base };
   const current = currentFor(g, gate, sha);
   let diff;
@@ -478,7 +485,7 @@ async function run(repo, [gate, idArg], flags) {
   for (const s of [...g.steps.filter((x) => !x.afterGate), ...g.steps.filter((x) => x.afterGate)]) {
     let r = g.records[s.id] && current(g.records[s.id].sha) && !rerun.has(s.id) ? g.records[s.id] : null;
     const old = g.records[s.id];
-    if (s.plan && !g.records[`${s.id}.plan`] && r?.status !== 'na') {
+    if (s.plan && !g.records[`${s.id}.plan`] && r?.status !== 'na' && !(s.if && !touches(s.if))) {
       commits ??= Number(git(repo, 'rev-list', '--count', `${base}..${sha}`));
       say(ctx, s, commits
         ? `no plan recorded before the work, and the work has ${commits} commit(s) already: the lead records lc-gate record ${gate} ${id} ${s.id} plan na --reason …`
@@ -566,6 +573,29 @@ function put(ctx, s, status, evidence, reason, by) {
   return rec;
 }
 
+// sessions.gate_setup: one worktree of the gate at the candidate, the command run in it once (say,
+// installing dependencies, so a session can run a check); its output in setup.log. A new candidate
+// gets a new worktree. Unset, each session reads in a worktree of its own.
+function gateWorktree(ctx, setup) {
+  if (ctx.setupFailed) die(ctx.setupFailed);
+  const dir = join(ctx.dir, 'worktree');
+  const made = join(ctx.dir, 'worktree.json');
+  if (readJson(made, {}).candidate !== ctx.sha) {
+    rmSync(made, { force: true });
+    if (existsSync(dir)) exec('git', ['-C', ctx.repo, 'worktree', 'remove', '--force', dir], { ok: true });
+    rmSync(dir, { recursive: true, force: true });
+    exec('git', ['-C', ctx.repo, 'worktree', 'prune']);
+    exec('git', ['-C', ctx.repo, 'worktree', 'add', '-q', '--detach', dir, ctx.sha]);
+    const log = join(ctx.dir, 'setup.log');
+    const fd = openSync(log, 'w');
+    const r = spawnSync('bash', ['-c', setup], { cwd: dir, stdio: ['ignore', fd, fd], timeout: COMMAND_TIMEOUT });
+    closeSync(fd);
+    if (r.status !== 0) die((ctx.setupFailed = `sessions.gate_setup failed in ${dir} (${r.error?.message ?? `exit ${r.status}`}); log ${log}`));
+    writeJson(made, { candidate: ctx.sha });
+  }
+  return dir;
+}
+
 // What `run` does for a step without a record; returns the record when it wrote one.
 const STEP = {
   // Runs at the candidate on a clean tree, in its own process group so a timeout kills all of it.
@@ -636,7 +666,9 @@ const STEP = {
     mkdirSync(dirname(brief), { recursive: true });
     // Findings of an earlier candidate are kept beside, so the new session starts from an empty file.
     if (existsSync(findings)) renameSync(findings, join(ctx.dir, 'findings', `${s.id}.before-${ctx.sha.slice(0, 12)}.md`));
-    const values = { gate: ctx.gate, id: ctx.id, step: s.id, session: name, question: s.arg, base: ctx.base, candidate: ctx.sha, evidence: join(ctx.dir, 'evidence'), findings };
+    const setup = ctx.cfg.conf['sessions.gate_setup'];
+    const checkout = setup ? `read in the gate's worktree \`${gateWorktree(ctx, setup)}\`, set up by \`${setup}\`: run checks there, edit nothing` : 'read in your own detached worktree';
+    const values = { gate: ctx.gate, id: ctx.id, step: s.id, session: name, question: s.arg, base: ctx.base, candidate: ctx.sha, checkout, evidence: join(ctx.dir, 'evidence'), findings };
     writeFileSync(brief, readFileSync(join(KIT, 'templates/gate-brief.md'), 'utf8').replace(/\{\{(\w+)\}\}/g, (_, k) => values[k]));
     // The model floor: a gate session runs on the gate's model and effort, never on the lead's.
     const conf = ctx.cfg.conf;
@@ -720,6 +752,8 @@ function writeRecord(g, gate, id, sha) {
     `- **Candidate:** ${sha}`,
     `- **Base:** ${g.state.base ?? ''}`,
     `- **Generated:** ${new Date().toISOString()}`,
+    // An owner step the lead recorded N/A (a scratch or dry run): no acceptance, said where it is read.
+    ...g.steps.filter((s) => s.kind === 'owner' && g.records[s.id]?.status === 'na').map((s) => `- **Owner acceptance:** not given: ${s.id} is N/A by ${g.records[s.id].by} (${cell(g.records[s.id].reason)})`),
     '',
     '| Step | Kind | Status | Commit | By | Evidence | Reason |',
     '| --- | --- | --- | --- | --- | --- | --- |',

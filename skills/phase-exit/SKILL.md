@@ -28,7 +28,7 @@ Only you record N/A or a carry, each with its reason.
 
 ## Acceptance
 
-A passed check is not acceptance. The `owner` step asks the owner on the board, with each journey and the exact steps to try it on a fresh stack. The next `lc-gate run phase <id>` records the answer; nobody records it by hand.
+A passed check is not acceptance. The `owner` step asks the owner on the board, with each journey and the exact steps to try it on a fresh stack. The next `lc-gate run phase <id>` records the answer; nobody records it by hand. In a scratch or dry run you record it N/A with a reason, and the record says acceptance was not given.
 
 ## Exit and close
 

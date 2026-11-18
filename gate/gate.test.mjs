@@ -156,6 +156,20 @@ test('nobody records the owner step by hand', () => {
   assert.match(lc({}, 'record', 'phase', 'x', 'acceptance', 'pass', '--evidence', 'yes.txt', '--candidate', 'HEAD').stderr, /only the owner's answer on the board/);
 });
 
+// A scratch or dry run: the lead records the owner step N/A, and the phase record says so.
+test('the lead may record the owner step N/A, stated in the phase record; a spawned session may not', () => {
+  const { lc, repo } = project('handoff_dir: $STATE\ndocs:\n  phase_records: records/\ngate_phase:\n  acceptance: owner\n');
+  const spawned = { LC_SESSION: 'gate-x-acceptance', LC_GATE_STEP: 'phase/x/acceptance' };
+  assert.match(lc(spawned, 'record', 'phase', 'x', 'acceptance', 'na', '--reason', 'r', '--candidate', 'HEAD').stderr, /may not record N\/A/);
+  const r = lc({ LC_SESSION: '' }, 'record', 'phase', 'x', 'acceptance', 'na', '--reason', 'dry run, no owner', '--candidate', 'HEAD');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(lc({}, 'check', 'phase', 'x').status, 0);
+  assert.equal(lc({}, 'status', 'phase', 'x', '--write').status, 0);
+  const text = readFileSync(join(repo, 'records/x.md'), 'utf8');
+  assert.match(text, /^- \*\*Owner acceptance:\*\* not given: acceptance is N\/A by lead \(dry run, no owner\)$/m);
+  assert.match(text, /^\| acceptance \| owner \| N\/A \|/m);
+});
+
 // A plan: a step line ending in `plan` needs records/<step>.plan.json, made before the branch's first commit.
 const PLANNED = 'handoff_dir: $STATE\npaths:\n  mech: src/**\ngate_pr:\n  fit: here docs/fit.md if mech plan\n';
 

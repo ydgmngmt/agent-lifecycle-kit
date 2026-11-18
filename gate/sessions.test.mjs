@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +31,7 @@ case "$1" in
   list-windows) cat "${fake}/windows" 2>/dev/null ;;
   capture-pane) cat "${fake}/pane" 2>/dev/null ;;
   new-window|new-session) n=$(cat "${fake}/n" 2>/dev/null || echo 6); n=$((n + 1)); echo $n >"${fake}/n"; echo @$n ;;
-  send-keys) [ -e "${fake}/sticky" ] || echo working >"${fake}/pane" ;;
+  send-keys) if [ -s "${fake}/drop" ]; then d=$(cat "${fake}/drop"); [ "$d" -gt 1 ] && echo $((d - 1)) >"${fake}/drop" || : >"${fake}/drop"; else [ -e "${fake}/sticky" ] || echo working >"${fake}/pane"; fi ;;
 esac
 exit 0
 `, { mode: 0o755 });
@@ -169,4 +169,53 @@ test("a gate session's window is closed when its record lands, and run closes on
   const run = g.lc('run', 'phase', 'x');
   assert.match(g.calls(), /^kill-window -t agents:gate-x-review$/m, run.stdout);
   assert.match(run.stdout, /closed its window gate-x-review/);
+});
+
+// Claude Code drops keys sent the moment its prompt is first drawn, and more often while other sessions start.
+test('lc-spawn sends the answer again while the folder-trust prompt still shows', () => {
+  const f = fixture(SESSION);
+  f.pane(TRUST);
+  writeFileSync(join(f.fake, 'drop'), '1');
+  const r = f.spawn(f.repo, f.repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(f.calls().match(/^send-keys -t @7 Enter$/gm).length, 2, f.calls());
+  assert.match(r.stdout, /answered Claude Code's folder-trust prompt/);
+});
+
+test('lc-gate run writes the evidence folder\'s files.txt and prs.txt, with no freeze step', () => {
+  const f = fixture(SESSION);
+  f.pane('working\n');
+  f.sh('echo a > a.txt && git add a.txt && git commit -qm two');
+  f.lc('run', 'phase', 'x', '--base', 'HEAD~1');
+  const ev = join(f.repo, 'state/gates/phase/x/evidence');
+  assert.equal(readFileSync(join(ev, 'files.txt'), 'utf8'), 'a.txt\n');
+  assert.equal(readFileSync(join(ev, 'prs.txt'), 'utf8'), '');
+  assert.match(readFileSync(join(f.repo, 'state/gates/phase/x/briefs', `review-${f.sh('git rev-parse --short=12 HEAD')}.md`), 'utf8'), new RegExp(`Evidence folder: \`${ev}\``));
+});
+
+test('sessions.gate_setup runs once in a worktree at the candidate, which the briefs name; unset, none is made', () => {
+  const TWO = 'handoff_dir: $STATE\ngate_phase:\n  one: session q.md\n  two: session q.md\n';
+  const f = fixture(`${TWO}sessions:\n  gate_setup: echo ran >> ../setup.count && touch installed\n`);
+  f.pane('working\n');
+  const r = f.lc('run', 'phase', 'x', '--base', 'HEAD');
+  assert.equal(r.stdout.match(/started session/g)?.length, 2, r.stdout + r.stderr);
+  const wt = join(f.repo, 'state/gates/phase/x/worktree');
+  assert.ok(existsSync(join(wt, 'installed')));
+  assert.equal(f.sh(`git -C ${wt} rev-parse HEAD`), f.sh('git rev-parse HEAD'));
+  assert.equal(readFileSync(join(f.repo, 'state/gates/phase/x/setup.count'), 'utf8'), 'ran\n');
+  const brief = readFileSync(join(f.repo, 'state/gates/phase/x/briefs', `two-${f.sh('git rev-parse --short=12 HEAD')}.md`), 'utf8');
+  assert.match(brief, new RegExp(`read in the gate's worktree \`${wt}\``));
+  const g = fixture(TWO);
+  g.pane('working\n');
+  g.lc('run', 'phase', 'x', '--base', 'HEAD');
+  assert.ok(!existsSync(join(g.repo, 'state/gates/phase/x/worktree')));
+  assert.match(readFileSync(join(g.repo, 'state/gates/phase/x/briefs', `one-${g.sh('git rev-parse --short=12 HEAD')}.md`), 'utf8'), /read in your own detached worktree/);
+});
+
+test('a planned step whose paths the diff misses is N/A, with no word about its plan', () => {
+  const f = fixture('handoff_dir: $STATE\npaths:\n  mech: src/**\ngate_phase:\n  fit: session q.md if mech plan\n');
+  f.sh('echo a > a.txt && git add a.txt && git commit -qm two');
+  const r = f.lc('run', 'phase', 'x', '--base', 'HEAD~1');
+  assert.match(r.stdout, /fit\s+session\s+N\/A \(no file changed/, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stdout, /plan/);
 });

@@ -39,3 +39,11 @@ After any upgrade, rerun the `bootstrap` skill: it finds what is missing and wal
 - **Local merges.** With no pull requests, the plugin hook checks `git merge <branch>` into the default branch against that branch's PR gate, as it does `gh pr merge`. Rerun `./install.sh` or update the plugin for the new hook entries.
 - **Wizard:** it asks for `sessions.agent_flags` (how gate sessions get permissions unattended), offers `none` for browser, tenants, linter and CI, and puts a decision no rule kind fits into the review checklist as a `(must-fix)` item.
 - **Quieter:** an observe message is told once per commit; a gate session's window closes 10 seconds after its own record (`LC_CLOSE_DELAY`), and `lc-gate run` closes one left open.
+
+## From 1.4 to 1.5
+
+- **New key:** `sessions.gate_setup`, optional: a command `lc-gate run` runs once in one worktree of the gate at the candidate (for example installing dependencies); the gate's session briefs name that worktree, so a session can run a check there. Unset, nothing changes.
+- `lc-gate run` always writes `prs.txt` and `files.txt` into the evidence folder, so a skipped freeze step still leaves the scope.
+- The lead may record an `owner` step N/A with a reason (a scratch or dry run); the phase record states that acceptance was not given.
+- `lc-spawn` sends its answer to the folder-trust prompt again each second while the prompt shows: keys sent as it is first drawn are dropped.
+- No CI host: keep `ci.enforcement: none`; `lc-gate enforcement` names it instead of asking for `ci.required_checks`.

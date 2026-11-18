@@ -380,6 +380,24 @@ test('enforcement --strict: exit 1 when no layer can refuse, naming what is miss
   assert.equal(on.status, 0, on.stdout);
 });
 
+// No CI host, stated as `ci.enforcement: none`: the host rows say so, not "set ci.required_checks".
+test('enforcement: ci.enforcement none is named as no CI host', () => {
+  const yaml = YAML.replace(/ci:\n {2}required_checks: .*\n/, 'ci:\n  enforcement: none\n').replace('gate_pr_mode: enforce\ngate_pr_plan: enforce\n', 'gate_pr_mode: observe 3\ngate_pr_plan: observe 3\n');
+  const out = repoWith(yaml).lc(['enforcement']).stdout;
+  assert.match(line(out, /required checks on/), /off: no CI host \(ci\.enforcement: none\)/);
+  assert.doesNotMatch(out, /set ci\.required_checks|ci\.required_checks is not set/);
+  assert.match(line(out, /^refusal/), /No host \(ci\.enforcement: none\)/);
+});
+
+test('the no-host instructions agree: keep ci.enforcement none, and the rules run once', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const tpl = await readFile(join(KIT, 'templates/project.yaml'), 'utf8');
+  assert.doesNotMatch(tpl, /delete the ci block/);
+  const item = (await readFile(join(KIT, 'skills/bootstrap/checklist.md'), 'utf8')).split('\n').find((l) => l.startsWith('| 12 |'));
+  assert.match(item, /ci\.enforcement: none/);
+  assert.match(item, /the rules, unless that profile runs them/);
+});
+
 // A local merge into the default branch is checked like gh pr merge (a project without pull requests).
 test('the merge hook checks git merge of a branch into the default branch', () => {
   const r = repoWith(COUNTED('enforce'), { layers: false });

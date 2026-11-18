@@ -134,6 +134,8 @@ function rows(repo) {
   const planned = prSteps.filter((s) => s.plan);
   const checks = words(c['ci.required_checks']);
   const flows = workflowFiles(repo);
+  // With no check required: no CI host stated (ci.enforcement: none), or the key unset.
+  const noChecks = /^none\b/.test(c['ci.enforcement'] ?? '') ? 'ci.enforcement: none' : 'ci.required_checks is not set';
 
   // The host.
   const branch = defaultBranch(repo);
@@ -145,7 +147,7 @@ function rows(repo) {
   const lacking = checks.filter((x) => !have.includes(x));
   const H = 'host refuses';
   const by = 'lc-gate protect, with the owner\'s host login';
-  add(H, `required checks on ${branch}: ${checks.join(', ') || '(ci.required_checks is not set)'}`, by, 'the merge, while a check is missing or red', checks.length ? host(!lacking.length, `not required: ${lacking.join(', ')}`) : 'off: set ci.required_checks', Boolean(checks.length));
+  add(H, `required checks on ${branch}: ${checks.join(', ') || `(${noChecks})`}`, by, 'the merge, while a check is missing or red', checks.length ? host(!lacking.length, `not required: ${lacking.join(', ')}`) : noChecks === 'ci.enforcement: none' ? 'off: no CI host (ci.enforcement: none)' : 'off: set ci.required_checks', Boolean(checks.length));
   add(H, 'branch up to date before merge', by, 'a merge of a head not tested on the current base', host(j.required_status_checks?.strict === true, 'strict is off'), Boolean(checks.length));
   add(H, 'pull requests only', by, 'a push straight to the default branch', host(Boolean(j.required_pull_request_reviews), 'no pull request required'), Boolean(checks.length));
   add(H, 'administrators included', by, 'the owner\'s login (and every session using it) skipping the above', host(j.enforce_admins?.enabled === true, 'administrators can bypass'), Boolean(checks.length));
@@ -225,7 +227,7 @@ function rows(repo) {
     prSteps.length && prMode.mode === 'enforce' && plugin && 'the Claude Code plugin hook at the gate start and merge',
     planned.length && planMode.mode === 'enforce' && (plugin || hook.on) && `the ${[plugin && 'Claude Code plugin', hook.on && 'git pre-commit'].filter(Boolean).join(' and ')} hook on edits and commits`,
   ].filter(Boolean);
-  const hostWhy = () => (!checks.length ? 'ci.required_checks is not set' : out.find((r) => r.layer === H && r.configured && !r.state.startsWith('on'))?.state);
+  const hostWhy = () => (!checks.length ? noChecks : out.find((r) => r.layer === H && r.configured && !r.state.startsWith('on'))?.state);
   const modeWhy = (m) => (m.mode === 'enforce' ? `${m.key} enforce, but its hook is off` : `${m.key} ${modeText(m)}${m.mode === 'observe' ? ' (observe only logs)' : ''}`);
   add('refusal', 'some layer refuses a change without its records', 'the layers above', 'everything: without one, the gates only log',
     refusers.length ? `on: ${refusers.join('; ')}` : `off: nothing refuses. No host (${hostWhy()}); ${modeWhy(prMode)}; ${planned.length ? modeWhy(planMode) : 'no planned step'}. Set a mode to enforce, or the host's required checks`);

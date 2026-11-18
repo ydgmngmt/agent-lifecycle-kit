@@ -7,7 +7,8 @@
 # For claude, it watches the new window for up to LC_TRUST_WAIT seconds (15): Claude Code's
 # folder-trust prompt is answered for a folder inside a worktree of the repository lc-spawn runs in
 # (else <workdir>'s) or its handoff_dir; for any other folder it says the session waits on it. It says
-# the prompt was answered only once the pane no longer shows it; else that the session still waits.
+# the prompt was answered only once the pane no longer shows it (the answer is sent again each second
+# while it shows); else that the session still waits.
 set -euo pipefail
 [[ $# -eq 3 ]] || { echo "usage: lc-spawn <name> <workdir> <brief-file>" >&2; exit 2; }
 name="$1"; dir="$2"; brief="$3"
@@ -58,34 +59,25 @@ trusted() {
 asks() { grep -Eqi 'trust (this|the files in this) folder|do you trust' <<<"$1"; }
 
 if [[ $agent == claude ]]; then
-  last=""; same=0
+  # Claude Code drops keys sent as its prompt is first drawn (more often while other sessions start), so
+  # the answer is sent again each second while the prompt still shows.
+  last=""; same=0; asked=""; gone=""; next=0
   for ((i = 0; i < ${LC_TRUST_WAIT:-15} * 4; i++)); do
     pane=$(tmux capture-pane -p -t "$window" 2>/dev/null) || break
     if asks "$pane"; then
-      if trusted "$dir"; then
+      asked=1
+      trusted "$dir" || break
+      if ((i >= next)); then
         # The cursor is not always on "Yes": move it there, then confirm.
         at=$(awk '/❯/{c=NR} /Yes/{y=NR} END{print (c && y) ? y - c : 0}' <<<"$pane")
         for ((k = 0; k < ${at#-}; k++)); do tmux send-keys -t "$window" "$([[ $at -gt 0 ]] && echo Down || echo Up)"; done
         tmux send-keys -t "$window" Enter
-        # Answered only once the pane no longer shows the prompt.
-        gone=""
-        for ((j = 0; j < 12; j++)); do
-          sleep 0.25
-          pane=$(tmux capture-pane -p -t "$window" 2>/dev/null) || break
-          if ! asks "$pane"; then gone=1; break; fi
-        done
-        if [[ -n $gone ]]; then
-          echo "lc-spawn: answered Claude Code's folder-trust prompt for $dir"
-        else
-          echo "lc-spawn: $name is still waiting on Claude Code's folder-trust prompt for $dir: answer it in tmux window $session:$name"
-        fi
-      else
-        echo "lc-spawn: $name is waiting on Claude Code's folder-trust prompt for $dir, which is outside this repository's worktrees and handoff_dir: answer it in tmux window $session:$name"
+        next=$((i + 4))
       fi
-      break
-    fi
-    # Settled without asking: the same text for a second.
-    if [[ -n ${pane//[[:space:]]/} && $pane == "$last" ]]; then
+    elif [[ -n $asked ]]; then
+      gone=1; break
+    elif [[ -n ${pane//[[:space:]]/} && $pane == "$last" ]]; then
+      # Settled without asking: the same text for a second.
       same=$((same + 1))
       if ((same >= 4)); then break; fi
     else
@@ -94,6 +86,14 @@ if [[ $agent == claude ]]; then
     last=$pane
     sleep 0.25
   done
+  if [[ -z $asked ]]; then :
+  elif ! trusted "$dir"; then
+    echo "lc-spawn: $name is waiting on Claude Code's folder-trust prompt for $dir, which is outside this repository's worktrees and handoff_dir: answer it in tmux window $session:$name"
+  elif [[ -n $gone ]]; then
+    echo "lc-spawn: answered Claude Code's folder-trust prompt for $dir"
+  else
+    echo "lc-spawn: $name is still waiting on Claude Code's folder-trust prompt for $dir: answer it in tmux window $session:$name"
+  fi
 fi
 if [[ -n $open_tab ]]; then bash -c "$open_tab" _ "$name" || true; fi
 echo "spawned $name in tmux session $session"

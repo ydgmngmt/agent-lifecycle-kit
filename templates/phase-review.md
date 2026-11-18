@@ -4,7 +4,7 @@ This page holds the project's values for the phase exit; the steps are `gate_pha
 
 ## The project's values
 
-**Evidence folder** (the freeze step's script writes it, at `CANDIDATE`, without judgment):
+**Evidence folder** (the freeze step's script writes it, at `CANDIDATE`, without judgment; `lc-gate run` always writes `prs.txt` and `files.txt`):
 
 ```bash
 git log --first-parent --merges --format='%h %s' START..CANDIDATE > prs.txt
