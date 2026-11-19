@@ -167,4 +167,4 @@ sessions:                                 # read by lc-spawn, lc-close, lc-view
   agent_flags: <how gate sessions get permissions unattended, e.g. --permission-mode auto>   # "": each stops at its first prompt
   max_subagents: <n>                      # how many subagents one session runs at a time
   owner_read: <command that opens a diff or doc for the owner>
-  # open_tab: <command that opens a terminal tab on a new session, given its name as $1; unset: none, so spawning never takes focus>
+  open_tab: <command that opens a terminal tab on a new session, given its name as $1, and leaves the focus where the owner is (docs/machine.md)>   # unset: no tab, the owner sees no session
