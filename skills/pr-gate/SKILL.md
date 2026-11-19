@@ -26,7 +26,7 @@ Your own check before the gate, never a gate step. `code-review` against the bas
 
 A flow script the project keeps, run by a command; no session drives the browser on a passing PR.
 
-1. **Author.** A change to a flow comes with its flow script, written or updated in the same PR with the project's browser test tool (`browser`): real sign-in, ordinary controls, the result asserted, asserted again after a reload, then the next dependent action. A backend flow goes through the public API, CLI or event entry. No mocked responses, no injected state. One script per journey, listed in the project's inventory: update the journey's script, never add a second. Get it passing on your lane (`lanes.up`).
+1. **Author.** A change to a flow comes with its flow script, written or updated in the same PR with the project's browser test tool (`browser`): real sign-in, ordinary controls, the result asserted, asserted again after a reload, then the next dependent action. A backend flow goes through the public API, CLI or event entry. No mocked responses, no injected state. One script per journey, listed in the project's inventory: update the journey's script, never add a second. A new journey's script may start as a draft from the project's draft command, where it has one (`docs.testing`); the assertions are yours. Get it passing on your lane (`lanes.up`).
 2. **Review.** The reviewer judges the script against the brief (the checklist's flow-script item).
 3. **Gate.** The `live-check` command runs the scripts that cover the diff on the pushed commit, and fails on a flow path no script covers. Its output, and on a failure its trace, screenshot and logs, are the evidence. On a failure, `diagnosing-bugs` with a red loop on that script before changing code.
 

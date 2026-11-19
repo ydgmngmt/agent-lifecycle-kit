@@ -58,3 +58,4 @@ After any upgrade, rerun the `bootstrap` skill: it finds what is missing and wal
 
 - **The live check is a command.** The author keeps a flow script per changed flow; `live-check` in `gate_pr` runs the scripts covering the diff on the pushed head, in place of a session or a pipeline test step. Copy the flow-script item from `templates/review/checklist.md` into your checklist.
 - **1.7.1:** commits on top of a passed session step get a review of only the change since the pass. Give `live-check` its own `paths.live` (the flow paths plus the scripts, their config and helpers), so a script-only change runs its script.
+- **1.7.2:** a new journey's flow script may start from the project's draft command; the orchestrator keeps every session on the latest kit.

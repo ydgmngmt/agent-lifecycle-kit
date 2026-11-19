@@ -18,6 +18,7 @@ Inputs: `.agents/project.yaml` (`sessions`, `handoff_dir`, `merge`, `owner_appro
 9. **Running log:** one append-only file per phase in `handoff_dir`, one line per event, `- <date time>: <what changed>`; lines the owner must act on start with `FOR THE OWNER`.
 10. **Owner reads:** open the PR or doc for the owner (`sessions.owner_read`), not only its name.
 11. **Close** after the merge: `lc-close <name>`, take its stack down, remove the worktree, delete the local branch; keep the remote one.
+12. **Kit version.** Before a phase starts and when told of a release, update the kit (`git pull` in its clone, `./install.sh`, the plugin update) and tell every running session to do the same before its next gate step.
 
 ## Briefs
 
