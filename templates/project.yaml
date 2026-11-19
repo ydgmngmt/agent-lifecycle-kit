@@ -93,6 +93,7 @@ gate_pr_plan: observe 3                   # a step ending in `plan`: edits and c
 
 paths:                                    # globs separated by spaces; ** spans directories
   flow: <globs of code a person or agent uses, e.g. apps/web/** packages/api/**>
+  live: <paths.flow plus the flow scripts, their config and helpers>
   sensitive: <globs of the sensitive code paths>
   mechanism: <globs where a new mechanism can land, e.g. apps/** packages/** tools/** **/package.json>
 
@@ -104,7 +105,7 @@ gate_pr:
   rules: command lc-rules check --base $LC_GATE_BASE   # .agents/rules.yaml, judged by the base's copy; no CI host needed
   reviewer: session docs/review-checklist.md   # every PR, against its brief, by kind of diff; P1 or P2 fails; the review after a fix checks the fix only
   review: command node .agents/ci/pipeline-passed.mjs review after-gate   # the review pipeline's own result for the head
-  live-check: command <the command that runs the flow scripts covering the diff> if flow after-gate   # on the pushed head; fails on a flow path no script covers
+  live-check: command <the command that runs the flow scripts covering the diff> if live after-gate   # on the pushed head; fails on a flow path no script covers
   # With no review pipeline, a separate session reviews the code instead of the two after-gate steps:
   # correctness: session docs/review/correctness.md if flow
 

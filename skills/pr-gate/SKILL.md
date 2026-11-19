@@ -34,7 +34,7 @@ With no flow to show: for docs, every link resolves and each claim is true at th
 
 ## Reviewer
 
-A `session` step with the project's checklist (`docs.review_checklist`) on every PR, by kind of diff, never the implementer; its brief names the PR's brief, which it judges the diff against. It records `fail` on a P1 or P2 finding. After a fail it reviews only the fix; after two such reviews still failing, the orchestrator decides. Commits after its pass make it stale: the orchestrator reruns it (`lc-close <name>`, then `lc-gate run pr <branch> --rerun <step>`) or carries it with a reason.
+A `session` step with the project's checklist (`docs.review_checklist`) on every PR, by kind of diff, never the implementer; its brief names the PR's brief, which it judges the diff against. It records `fail` on a P1 or P2 finding. After a fail it reviews only the fix; after two such reviews still failing, the orchestrator decides. Commits after its pass make it stale, and the next session reviews only them: the orchestrator reruns it (`lc-close <name>`, then `lc-gate run pr <branch> --rerun <step>`) or carries it with a reason.
 
 ## Besides the records
 

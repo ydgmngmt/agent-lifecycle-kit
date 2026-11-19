@@ -680,7 +680,8 @@ const STEP = {
     // A review after a fix: the step failed at an earlier candidate this one descends from. After two
     // such reviews with a P1 or P2 still open, no further session: the lead decides.
     const old = ctx.records[s.id];
-    const earlier = old?.status === 'fail' && old.sha !== ctx.sha && exec('git', ['-C', ctx.repo, 'merge-base', '--is-ancestor', old.sha, ctx.sha], { ok: true }).status === 0 ? old : null;
+    const before = (old?.status === 'fail' || old?.status === 'pass') && old.sha !== ctx.sha && exec('git', ['-C', ctx.repo, 'merge-base', '--is-ancestor', old.sha, ctx.sha], { ok: true }).status === 0 ? old : null;
+    const earlier = before?.status === 'fail' ? before : null;
     const roundsFile = join(ctx.dir, 'rounds.json');
     const rounds = readJson(roundsFile, {});
     const round = earlier ? (rounds[s.id]?.[earlier.sha] ?? 0) + 1 : 0;
@@ -698,6 +699,8 @@ const STEP = {
       const was = earlier.evidence === findings ? kept : earlier.evidence;
       scope = `a review after a fix. The step failed at \`${earlier.sha.slice(0, 12)}\` with the findings in \`${was}\`; the fix is \`git diff ${earlier.sha} ${ctx.sha}\`. Check that each of its P1 and P2 is resolved at the candidate and that the fix's own lines add none; raise nothing else, unless a P1 or P2 with its evidence.`;
     }
+    // Commits on top of a pass: only they are reviewed.
+    if (before?.status === 'pass') scope = `a review of the change since a pass. The step passed at \`${before.sha.slice(0, 12)}\`; the change since is \`git diff ${before.sha} ${ctx.sha}\`. Review those lines as deep as the review skill asks; raise nothing in the rest, unless a P1 or P2 with its evidence.`;
     writeJson(roundsFile, { ...rounds, [s.id]: { ...rounds[s.id], [ctx.sha]: round } });
     const spec = ctx.gate !== 'pr' ? 'The spec: the inputs the question file names.'
       : ((b) => (b ? `The PR's brief: \`${b}\`; judge the change against it.` : "The PR's brief: none known; judge the change against the PR body."))(prBrief(ctx));

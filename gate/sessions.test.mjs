@@ -250,6 +250,21 @@ test('after a failed review, the next session checks the fix: the earlier findin
   assert.match(briefAt(f), /Scope: a full review/);
 });
 
+test('commits on top of a passed review get a review of the change since the pass', () => {
+  const f = fixture(SESSION);
+  f.pane('working\n');
+  f.lc('run', 'phase', 'x', '--base', 'HEAD');
+  const c1 = f.sh('git rev-parse HEAD');
+  const dir = join(f.repo, 'state/gates/phase/x');
+  mkdirSync(join(dir, 'records'), { recursive: true });
+  writeFileSync(join(dir, 'records/review.json'), JSON.stringify({ step: 'review', status: 'pass', sha: c1, evidence: join(dir, 'findings/review.md'), by: 'gate-x-review', at: 't', spawned: true }));
+  f.sh('git commit -q --allow-empty -m more');
+  f.lc('run', 'phase', 'x', '--candidate', 'HEAD', '--rerun', 'review');
+  const b = briefAt(f);
+  assert.match(b, /Scope: a review of the change since a pass/);
+  assert.match(b, new RegExp(`git diff ${c1} ${f.sh('git rev-parse HEAD')}`));
+});
+
 test('with a P1 or P2 still open after two reviews after a fix, run starts no further session: the lead decides', () => {
   const f = fixture(SESSION);
   f.pane('working\n');
