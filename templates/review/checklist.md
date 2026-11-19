@@ -24,3 +24,7 @@ The project's per-change checklist (`docs.review_checklist`): the question file 
 
 8. (P2) <a written decision a diff can break that no rule kind fits exactly>. Where: <paths>.
 9. (P3) <a convention, e.g. one way to page a list>.
+
+## Flow script
+
+10. (P2) For a changed flow: does its flow script cover each "Done when" line a person can see, assert the result and that it persists after a reload, and weaken no existing assertion?

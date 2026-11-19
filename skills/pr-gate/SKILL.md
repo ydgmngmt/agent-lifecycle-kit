@@ -24,12 +24,11 @@ Your own check before the gate, never a gate step. `code-review` against the bas
 
 ## Live check
 
-Exercise the changed flow once through the real thing, with the project's verify skill where it has one (the step's argument or `docs.testing`).
+A flow script the project keeps, run by a command; no session drives the browser on a passing PR.
 
-1. Bring the stack up on your lane only (`lanes.up`); without a lane, ask the orchestrator.
-2. Drive the real flow: for UI, sign in and use the ordinary controls (`browser`); for a backend flow, the public API, CLI or event entry, through workers and storage. No mocked responses, no injected state.
-3. Verify the result, that it persists after a reload, and the next dependent action; for a bug fix, the path that failed. On failure, `diagnosing-bugs` with a red loop on this flow before changing code.
-4. Evidence: PASS / FAIL / BLOCKED / NOT TESTED with the commit, entry point, steps, result and time. Take the stack down; say the lane is free.
+1. **Author.** A change to a flow comes with its flow script, written or updated in the same PR with the project's browser test tool (`browser`): real sign-in, ordinary controls, the result asserted, asserted again after a reload, then the next dependent action. A backend flow goes through the public API, CLI or event entry. No mocked responses, no injected state. One script per journey, listed in the project's inventory: update the journey's script, never add a second. Get it passing on your lane (`lanes.up`).
+2. **Review.** The reviewer judges the script against the brief (the checklist's flow-script item).
+3. **Gate.** The `live-check` command runs the scripts that cover the diff on the pushed commit, and fails on a flow path no script covers. Its output, and on a failure its trace, screenshot and logs, are the evidence. On a failure, `diagnosing-bugs` with a red loop on that script before changing code.
 
 With no flow to show: for docs, every link resolves and each claim is true at the head; for tooling, CI or baselines, the output before and after; for unreachable code, its spec red before and green after.
 

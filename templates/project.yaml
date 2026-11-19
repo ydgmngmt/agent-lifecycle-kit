@@ -104,7 +104,7 @@ gate_pr:
   rules: command lc-rules check --base $LC_GATE_BASE   # .agents/rules.yaml, judged by the base's copy; no CI host needed
   reviewer: session docs/review-checklist.md   # every PR, against its brief, by kind of diff; P1 or P2 fails; the review after a fix checks the fix only
   review: command node .agents/ci/pipeline-passed.mjs review after-gate   # the review pipeline's own result for the head
-  live-check: command node .agents/ci/pipeline-passed.mjs test if flow after-gate
+  live-check: command <the command that runs the flow scripts covering the diff> if flow after-gate   # on the pushed head; fails on a flow path no script covers
   # With no review pipeline, a separate session reviews the code instead of the two after-gate steps:
   # correctness: session docs/review/correctness.md if flow
 
