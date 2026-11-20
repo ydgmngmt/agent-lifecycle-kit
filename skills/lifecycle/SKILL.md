@@ -47,7 +47,7 @@ Terms:
 ## Roles
 
 - **Owner:** a person. Decides product meaning, scope, access, spend and authority; approves `owner_approval` changes; accepts each phase.
-- **Orchestrator (the lead):** one session per phase. Briefs, starts sessions, merges, keeps the running log. Only the lead records N/A or carries a record.
+- **Orchestrator (the lead):** one session per phase (`sessions.lead`). Briefs, starts sessions, merges, keeps the running log. Only the lead records N/A, carries a record or starts a review past `sessions.gate_rounds`.
 - **Implementer:** one session per brief.
 - **Gate sessions:** each started by `lc-gate run` with one question file.
 - **Board keeper:** a cheap session that keeps the board true (`board`).

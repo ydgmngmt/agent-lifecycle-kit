@@ -14,7 +14,7 @@ description: Use when you are a session given a brief to build one pull request,
 7. **Subagents** only for independent parts, at most `sessions.max_subagents` at a time; check each result yourself. They never gate, push or use a lane.
 8. **Docs** your change makes stale, in the same PR: stories, journeys, roadmap, glossary (`domain-modeling`). "Update the docs" is the `update-docs` sweep.
 9. **Before each push:** follow `machine` before a heavy command; run `profiles.commit` (typecheck and the tests covering the changed files), and `lc-rules check` when the project has `.agents/rules.yaml`, until both exit 0 on the head you push. A failure is yours, even in code you didn't change; if it is not small, file an issue and report it. Once a review exists, main comes in by merge, never by rebase.
-10. **PR gate,** in this order (`pr-gate`): the commit check green; push and `lc-pr open` (`lc-pr section` for one section after); `lc-gate run pr <branch>` until `lc-gate check pr <branch>` holds.
-11. **Report** ([report.md](../lifecycle/report.md)) to the orchestrator; stay available for fixes.
+10. **PR gate,** in this order (`pr-gate`): the commit check green; push and `lc-pr open` (`lc-pr section` for one section after); `lc-gate run pr <branch> --wait` until `lc-gate check pr <branch>` holds: it returns when a step changes, so a turn goes only to a finding.
+11. **Report** ([report.md](../lifecycle/report.md)); tell the orchestrator with `lc-tell lead "<line>"`, the one way to reach it. Stay available for fixes.
 
 Message peers directly about files, lanes and findings; scope, product rules and the plan go to the orchestrator.

@@ -46,7 +46,7 @@ The skills call the [mattpocock-skills](https://github.com/mattpocock/skills) se
 2. **`lc-gate enforcement`**: one line per gate step and layer, saying who records it, what refuses without it, and whether that is actually on. `--strict` exits 1 when a configured layer is off.
 3. **`lc-gate protect`**: prints the branch protection for `ci.required_checks`; `--yes` applies it. It only ever adds.
 
-Per pull request: `lc-pr open` writes the body from the template, `lc-gate run pr` walks the gate until `lc-gate check pr` holds, and `lc-gate merge pr` merges, one at a time. The full list is in [Enforcement](docs/enforcement.md#the-commands).
+Per pull request: `lc-pr open` writes the body from the template, `lc-gate run pr --wait` walks the gate until a step changes (follow-up reviews start by themselves), and `lc-gate merge pr` merges, one at a time. Between sessions: `lc-tell`, `lc-log`, `lc-park`. The full list is in [Enforcement](docs/enforcement.md#the-commands).
 
 **Mechanical rules.** What the project decided and a diff can break exactly (who may import a package, which dependencies are allowed, words or files that may not appear) becomes a rule in `.agents/rules.yaml`. Each rule names its written decision and is proved on a red and a green example; `lc-rules check` fails a finding beyond the baseline, and CI judges each change by the base commit's rules. The bootstrap writes the first ones; the phase exit proposes more from findings the reviews keep raising, and the owner decides.
 

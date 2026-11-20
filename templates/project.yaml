@@ -167,6 +167,10 @@ sessions:                                 # read by lc-spawn, lc-close, lc-view
   gate_effort: xhigh
   # gate_parallel: <n>                    # how many gate sessions lc-gate run starts at a time; unset: all at once
   # gate_setup: <cmd, e.g. pnpm install>  # run once in one worktree per gate candidate, where its sessions read; unset: each makes its own
+  # gate_rounds: 2                        # follow-up reviews of a step that may end in FAIL before only the lead starts another
+  # gate_flags: <agent flags for gate sessions in place of agent_flags; {kit} is the kit's directory (docs/machine.md)>
+  # memory_floor_mb: <n>                  # lc-spawn starts no session while less memory is available
+  lead: <the orchestrator's tmux window name; lc-tell lead and the board's answers reach it>
   agent_flags: <how gate sessions get permissions unattended, e.g. --permission-mode auto>   # "": each stops at its first prompt
   max_subagents: <n>                      # how many subagents one session runs at a time
   owner_read: <command that opens a diff or doc for the owner>

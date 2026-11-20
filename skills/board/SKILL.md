@@ -11,7 +11,7 @@ The owner watches the board, not the sessions: one local page per repository (`l
 
 1. **Questions go on the board:** `lc-board ask <id> --title … --body … --option "label|description" … --recommended <n>`, the recommended option first; the page always offers free text. Never ask only in chat; while the owner is present you may also ask interactively.
 2. **Same turn.** A decision, a merge no PR shows, a session started or stopped, or an answer acted on shows on the board within the turn: one setter, or one line to the keeper.
-3. **Answers.** Wait with `lc-board answers --wait` in the background. Act on each, log it in the running log, then `lc-board outcome <id> "<what was done>"`; without an outcome it shows as not acted on.
+3. **Answers.** The board process tells the lead each answer (`lc-tell lead`, `sessions.lead`); `lc-board answers` lists those since your last call. Act on each, log it (`lc-log`), then `lc-board outcome <id> "<what was done>"`; without an outcome it shows as not acted on.
 4. **Nothing unverified shown as done.** A criterion or journey is done only with evidence from a phase run or live check (`lc-board criterion <id> done --evidence <url>`). An item is done when its PR merged; the board derives that.
 5. **Live.** The page refreshes itself every 5 seconds; nobody reloads it or restarts the server to show a change.
 

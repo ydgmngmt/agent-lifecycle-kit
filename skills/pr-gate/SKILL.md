@@ -11,7 +11,7 @@ The steps are the project's `gate_pr:` block, walked in file order; `paths:` say
 
 1. `profiles.commit` green on the head.
 2. Push, then `lc-pr open --title <t> --section "<Heading>=<file>"…`: the body from the template, refused while a required section is empty. `lc-pr section "<Heading>" --file <f>` changes one section later.
-3. `lc-gate run pr <branch>` (no id: the current branch) until `lc-gate check pr <branch>` holds. A step with `after <step>` starts once those pass or are N/A, so the checks that cost no tokens come before the review session.
+3. `lc-gate run pr <branch> --wait` (no id: the current branch) until `lc-gate check pr <branch>` holds; `--wait` returns when a step changes. A step with `after <step>` starts once those pass or are N/A, so the checks that cost no tokens come before the review session. A stacked PR is reviewed against its base branch on the host; with no PR yet, `--base <parent>`.
 
 Once a review exists, main comes in by merge, never by rebase: a clean merge of main keeps every record but `checks`; a hand-resolved one is reviewed again, its resolved lines only.
 
@@ -39,7 +39,7 @@ With no flow to show: for docs, every link resolves and each claim is true at th
 
 ## Reviewer
 
-A `session` step with the project's checklist (`docs.review_checklist`) on every PR, by kind of diff, never the implementer; its brief names the PR's brief, which it judges the diff against. It records `fail` on a P1 or P2 finding. A follow-up review, after a fail or a pass, reads only the PR's own change since (`git log -p --first-parent --remerge-diff`): its commits and a merge's hand-resolved lines; after a merge of another branch, `git diff` since. After two reviews after a fix still failing, the orchestrator decides. A new head makes it stale unless only a clean merge of main came in: the orchestrator reruns it (`lc-close <name>`, then `lc-gate run pr <branch> --rerun <step>`) or carries it with a reason.
+A `session` step with the project's checklist (`docs.review_checklist`) on every PR, by kind of diff, never the implementer; its brief names the PR's brief, which it judges the diff against. It records `fail` on a P1 or P2 finding. A follow-up review, after a fail or a pass, reads only the PR's own change since (`git log -p --first-parent --remerge-diff`): its commits and a merge's hand-resolved lines; after a merge of another branch, `git diff` since. A follow-up review starts by itself once the step's FAIL, or its PASS at an ancestor, no longer holds; a session gone with no record is started again once. Once `sessions.gate_rounds` (2) follow-up reviews ended in FAIL, no further session starts: the orchestrator reads the fix and starts one more with `lc-gate run pr <branch> --rerun <step> --lead --reason "…"`, or records N/A. Any other stale record: the orchestrator reruns it (`--rerun <step>`) or carries it with a reason.
 
 ## Besides the records
 

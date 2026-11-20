@@ -61,13 +61,17 @@ The full usage is at the top of [`gate/gate.mjs`](../gate/gate.mjs).
 
 | Command | What |
 | --- | --- |
-| `lc-gate run <phase\|pr> [id]` | Walk the gate: each step without a record gets the next thing for its kind |
+| `lc-gate run <phase\|pr> [id] [--wait]` | Walk the gate: each step without a record gets the next thing for its kind; a follow-up review starts by itself. `--wait` walks again until a step changes (`LC_GATE_WAIT` seconds, 1500). `--rerun <step> --lead --reason "…"` starts one review past `sessions.gate_rounds` |
+| `lc-gate tally <phase\|pr> [--since <date>] [--md]` | Per question of each session step: reviews, how often it applied, its P1, P2 and P3 rows, over every findings file |
 | `lc-gate record <gate> <id> <step> …` | Record a result, an N/A, a carry or a plan; a gate session's own record closes its window after 10 seconds (`LC_CLOSE_DELAY`), and `run` closes any left open |
 | `lc-gate status <gate> <id>` | The table; `--write` generates the phase record, `--trailer` prints `Verified-By` |
 | `lc-gate check <gate> <id>` | Exit 1 listing missing, stale or failed steps; `check phase --diff <base> <head>` is the CI form |
 | `lc-gate merge pr [branch]` | The one way a PR merges, one at a time: updates a behind branch (a conflict stops it), waits for the `checks` step on the head (`LC_GATE_MERGE_WAIT` seconds, 1800), requires every record, then `gh pr merge --merge --match-head-commit` with the `Verified-By` trailer |
 | `lc-pr open --title <t> [--base <b>] [--draft] [--section "<Heading>=<file>"]…` | The PR from `pr.template` (else `.github/pull_request_template.md`); refused while a heading of `pr.required_sections` is empty |
 | `lc-pr section "<Heading>" --file <f> [--pr <n>]` | Replaces one section of the PR body, every other byte kept; appends it when missing |
+| `lc-tell <session\|lead> "<line>"` | One line to a session: logged in `<handoff_dir>/tell.log` and typed into its window; `lead` is `sessions.lead` |
+| `lc-log "<line>"` | One line in `board.running_log`, stamped with the time and the sender |
+| `lc-park <session> --resume "<point>"` · `lc-park resume <session>` | Close a session that only waits, with its resume point beside its brief; start it again on both |
 | `lc-gate plan-check [--staged] [--files <path>…]` | Exit 1 when a planned step applies and the branch has no plan |
 | `lc-gate hook` | The plugin's hook ([`hooks/hooks.json`](../hooks/hooks.json)) |
 | `lc-gate enforcement [--strict] [--md]` | What makes each step binding here, layer by layer, and whether each layer is on |

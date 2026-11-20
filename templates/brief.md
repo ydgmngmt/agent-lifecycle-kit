@@ -5,6 +5,7 @@ Read `.agents/project.yaml`, then `docs.agents`, `docs.testing` and `docs.lifecy
 - Session name: `<name>`
 - Worktree and branch: `<worktree>`, `<branch>` from origin/main
 - Lane: `<n>` or "no stack"
+- Needs the owner for: `<each protected or pinned file, baseline count or product decision this work needs the owner's answer on, or "nothing">`
 - Report: `<handoff_dir>/reports/<name>.md`
 
 ## Goal and why

@@ -71,3 +71,14 @@ Change the project file before updating the kit: a step line with `after-gate` i
 - **Merge with `lc-gate merge pr <branch>`;** set `merge.command` to it and drop `merge.candidate`. Drop `gate.run` and `ci.pr_checks`.
 - **`pr.template`** and **`pr.required_sections`** (comma-separated) for `lc-pr`; run `./install.sh` again for its link.
 - **Git 2.36** or later, for the follow-up review's `--remerge-diff`.
+
+## From 1.8 to 1.9
+
+- **No idle turns at the PR gate.** A session step whose FAIL, or PASS at an ancestor, no longer holds gets its follow-up review by itself, once its `after` holds. `lc-gate run … --wait` returns when a step changes (`LC_GATE_WAIT`, 1500 s); use it in place of polling.
+- **Rounds per gate.** `sessions.gate_rounds` (2): follow-up reviews of a step that may end in FAIL, whatever the commit. At the count only `lc-gate run <gate> <id> --rerun <step> --lead --reason "…"` starts another; the reason goes into the record's history. `lc-gate status` prints the count. `rounds.json` has a new shape: counts start again from this version.
+- **A gone session** (a brief, no window, no record) is started again once.
+- **Stacked PRs.** Without `--base`, a PR gate's base is the PR's base branch on the host when that is not the default branch.
+- **`if <key>`** reads the base's `paths.<key>` as well as the head's.
+- **New keys:** `sessions.lead` (the orchestrator's window, for `lc-tell lead` and the board), `sessions.gate_flags` (docs/machine.md), `sessions.memory_floor_mb`.
+- **New commands:** `lc-tell`, `lc-log`, `lc-park` (run `./install.sh` again for their links) and `lc-gate tally`. The board shows the read-afterwards list and tells the lead each answer; drop the lead's own `lc-board answers --wait`.
+- `lc-gate enforcement` names `gate.run`, `ci.pr_checks` and `merge.candidate` when they are still in the project file.
