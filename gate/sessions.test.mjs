@@ -492,11 +492,11 @@ test('lc-tell logs the line and types it into the receiver\'s window; lead is se
   const r = f.bin('lc-tell', ['lead', 'PR feat holds'], { LC_SESSION: 'impl' });
   assert.equal(r.status, 0, r.stderr);
   assert.match(f.calls(), /^send-keys -t @3 -l from impl: PR feat holds\nsend-keys -t @3 Enter$/m);
-  assert.match(readFileSync(join(f.repo, 'state/tell.log'), 'utf8'), /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\timpl\torch\tPR feat holds$/m);
+  assert.match(readFileSync(join(f.repo, 'state/tell.log'), 'utf8'), /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\timpl\torch\tPR feat holds\ttold$/m);
   const gone = f.bin('lc-tell', ['nobody', 'hello'], { LC_SESSION: 'impl' });
   assert.equal(gone.status, 1);
-  assert.match(gone.stderr, /no window nobody .*only in .*tell\.log/);
-  assert.match(readFileSync(join(f.repo, 'state/tell.log'), 'utf8'), /\timpl\tnobody\thello$/m);
+  assert.match(gone.stderr, /no window nobody .*kept in .*tell\.log/);
+  assert.match(readFileSync(join(f.repo, 'state/tell.log'), 'utf8'), /\timpl\tnobody\thello\trefused: no window nobody/m);
   const g = fixture('handoff_dir: $STATE\n');
   assert.match(g.bin('lc-tell', ['lead', 'x']).stderr, /no sessions\.lead/);
 });
@@ -586,17 +586,27 @@ test('lc-tell and lc-close address a window by its id: a name with a dot is not 
   assert.doesNotMatch(f.calls(), /kill-window -t (@1|agents:)/);
 });
 
-test('lc-tell leaves the line in the log when the window has unsent text in its input line', () => {
+// Prompt lines captured with `tmux capture-pane -p -e` from real Claude Code windows (2.1): the dim
+// placeholder of a new session, a dim suggested prompt after a turn, and text a person typed.
+const PLACEHOLDER = '\u001b[39m❯\u00a0\u001b[2mTry "fix lint errors"\u001b[0m';
+const SUGGESTED = '\u001b[39m❯\u00a0\u001b[2mHave the author fix F-1\u001b[0m';
+const TYPED = '\u001b[39m❯\u00a0owner half typed';
+test("lc-tell types over Claude Code's own dim placeholder or suggestion, never over typed text, and logs a refusal", () => {
   const f = fixture('handoff_dir: $STATE\n');
   f.windows('@1\tlead-x\n');
-  f.pane('done\n────\n❯ owner half typed\n────\n');
+  const box = (line) => f.pane(`done\n\u001b[2m────\u001b[0m\n${line}\n\u001b[2m────\u001b[0m\n`);
+  box(TYPED);
   const r = f.bin('lc-tell', ['lead-x', 'an answer']);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /lead-x has unsent text in its input line \(owner half typed\); the line is only in/);
+  assert.match(r.stderr, /lead-x has unsent text in its input line \( ?owner half typed\); the line is kept in .*tell\.log/);
   assert.doesNotMatch(f.calls(), /send-keys/);
-  f.pane('done\n────\n❯ \n────\n');
-  assert.equal(f.bin('lc-tell', ['lead-x', 'an answer']).status, 0);
-  assert.match(f.calls(), /^send-keys -t @1 -l /m);
+  assert.match(readFileSync(join(f.repo, 'state/tell.log'), 'utf8'), /\tlead-x\tan answer\trefused: lead-x has unsent text/);
+  for (const line of [SUGGESTED, PLACEHOLDER]) {
+    box(line);
+    assert.equal(f.bin('lc-tell', ['lead-x', 'an answer']).status, 0, line);
+  }
+  assert.equal(f.calls().match(/^send-keys -t @1 -l /gm).length, 2);
+  assert.match(readFileSync(join(f.repo, 'state/tell.log'), 'utf8'), /\tlead-x\tan answer\ttold$/m);
 });
 
 test('lc-park refuses a gate session: lc-gate run starts those', () => {
