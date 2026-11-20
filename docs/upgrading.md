@@ -75,8 +75,8 @@ Change the project file before updating the kit: a step line with `after-gate` i
 ## From 1.8 to 1.9
 
 - **No idle turns at the PR gate.** A session step whose FAIL, or PASS at an ancestor, no longer holds gets its follow-up review by itself, once its `after` holds. `lc-gate run … --wait` returns when a step changes (`LC_GATE_WAIT`, 1500 s); use it in place of polling.
-- **Rounds per gate.** `sessions.gate_rounds` (2): follow-up reviews of a step that may end in FAIL, whatever the commit. At the count only `lc-gate run <gate> <id> --rerun <step> --lead --reason "…"` starts another; the reason goes into the record's history. `lc-gate status` prints the count. `rounds.json` has a new shape: counts start again from this version.
-- **A gone session** (a brief, no window, no record) is started again once.
+- **Rounds per gate.** `sessions.gate_rounds` (2): follow-up reviews (every review of a step after its first, an amend or a rebase included) that may end in FAIL, whatever the commit; a start that failed is not counted. At the count only `lc-gate run <gate> <id> --rerun <step> --lead --reason "…"` starts another; the reason goes into the record's history. `lc-gate status` prints the count. `rounds.json` has a new shape: counts start again from this version.
+- **A gone session** (a brief, no window, no record) is started again once: not within 60 s of its start, not while tmux does not answer, and not after `lc-close` (which notes what it closed in the board's `closed.tsv`). `lc-close`, `lc-tell` and `lc-park` address a window by its id. A PR's gate keeps the base branch it was judged against; `lc-gate merge` refuses after a retarget until a walk.
 - **Stacked PRs.** Without `--base`, a PR gate's base is the PR's base branch on the host when that is not the default branch.
 - **`if <key>`** reads the base's `paths.<key>` as well as the head's.
 - **New keys:** `sessions.lead` (the orchestrator's window, for `lc-tell lead` and the board), `sessions.gate_flags` (docs/machine.md), `sessions.memory_floor_mb`.

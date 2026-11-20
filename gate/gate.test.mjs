@@ -747,6 +747,7 @@ test('lc-gate tally counts, per question of a session step, its reviews, how oft
   put('a/findings/reviewer.md', [row(1, 'yes', 'a.js:1', 'P1: F1'), row(2, 'yes', 'b.js:2', 'sound'), row(3, 'no', 'none', 'n/a')]);
   put('a/findings/reviewer.before-0123456789ab.md', [row(1, 'yes', 'a.js:1', 'must-fix'), row(2, 'yes', 'b.js:2', 'P3: F2'), row(3, 'no', 'none', 'n/a')]);
   put('team/b/findings/reviewer.md', [row(1, 'yes', 'a.js:1', 'P2: F1'), row(2, 'no', 'none', 'n/a'), row(3, 'no', 'none', 'n/a')]);
+  put('team/b/findings/reviewer.gone-0123456789ab.md', [row(1, 'yes', 'a.js:1', 'P1: F9')]);
   const r = lc({}, 'tally', 'pr', '--md');
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^\| step \| Q \| reviews \| applied \| P1 \| P2 \| P3 \| question \|$/m);
@@ -756,4 +757,34 @@ test('lc-gate tally counts, per question of a session step, its reviews, how oft
   assert.match(lc({}, 'tally', 'pr').stdout, /^reviewer\s+Q1\s+3\s+3\s+1\s+2\s+0\s+Types/m);
   assert.match(lc({}, 'tally', 'pr', '--since', '2999-01-01').stdout, /^reviewer\s+Q1\s+0\s+0\s+0\s+0\s+0/m);
   assert.match(lc({}, 'tally', 'pr', '--since', 'soon').stderr, /not a date/);
+});
+
+test('a command step with if does not hold across an own change to the project file: its paths may have moved', () => {
+  const { lc, git } = project('handoff_dir: $STATE\npaths:\n  code: src/\ngate_pr:\n  tests: command test ! -e src/bad if code\n');
+  git('git checkout -q -b feat && mkdir -p src && echo a > src/a.js && git add src && git commit -qm c1');
+  assert.match(lc({}, 'run', 'pr', 'feat').stdout, /tests\s+command\s+PASS/);
+  git("sed -i 's#code: src/#code: lib/#' .agents/project.yaml && touch src/bad && echo b >> src/a.js && git add .agents src && git commit -qm c2");
+  const r = lc({}, 'run', 'pr', 'feat');
+  assert.match(r.stdout, /tests\s+command\s+FAIL/, r.stdout + r.stderr);
+  assert.equal(lc({}, 'check', 'pr', 'feat').status, 1);
+});
+
+test('lc-gate merge refuses a PR retargeted since the gate judged it against another base', () => {
+  const p = behind();
+  const st = join(p.repo, 'state/gates/pr/feat/gate.json');
+  writeFileSync(st, JSON.stringify({ ...JSON.parse(readFileSync(st, 'utf8')), baseBranch: 'parent' }));
+  const r = p.merge();
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /judged against parent, but the PR's base is now main; nothing merged\. Run lc-gate run pr feat again/);
+  assert.doesNotMatch(p.gh.log(), /^pr merge/m);
+});
+
+test('--wait does not see a change in a failed command run again, and does not run it again', () => {
+  const { lc, git } = project('handoff_dir: $STATE\nci:\n  required_checks: verify-pr\ngate_pr:\n  tests: command echo x >> "$LC_GATE_EVIDENCE/count"; false\n  ci: checks\n');
+  git('git checkout -q -b feat && git commit -q --allow-empty -m work');
+  const gh = fakeGh();
+  gh.set('runs.json', checkRun('verify-pr', 'in_progress', null, 1));
+  const r = lc({ ...gh.env, LC_GATE_WAIT: '2', LC_GATE_WAIT_POLL: '1' }, 'run', 'pr', 'feat', '--wait');
+  assert.match(r.stdout, /--wait: nothing changed in 2s/, r.stdout + r.stderr);
+  assert.equal(readFileSync(join(git('pwd'), 'state/gates/pr/feat/evidence/count'), 'utf8'), 'x\n');
 });

@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,10 +29,10 @@ async function board() {
   writeFileSync(join(data, 'questions.json'), JSON.stringify([{ id: 'q1', title: 'Ship it?', options: [{ label: 'Yes' }, { label: 'No' }] }]));
   writeFileSync(join(data, 'answers.jsonl'), `${JSON.stringify({ id: 'q0', choice: 0, text: 'old', at: 't' })}\n`);
   const fake = mkdtempSync(join(tmpdir(), 'lc-fake-'));
-  writeFileSync(join(fake, 'tmux'), `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >>"${fake}/calls"\ncase "$1" in list-windows) printf '@1\\torch\\n' ;; esac\nexit 0\n`, { mode: 0o755 });
+  writeFileSync(join(fake, 'tmux'), `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >>"${fake}/calls"\ncase "$1" in list-windows) [ -f "${fake}/nowin" ] || printf '@1\\torch\\n' ;; esac\nexit 0\n`, { mode: 0o755 });
   writeFileSync(join(fake, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
   const port = await freePort();
-  const server = spawn('node', [join(KIT, 'board/server.mjs'), repo], { env: { ...process.env, PATH: `${fake}:${process.env.PATH}`, LC_BOARD_PORT: String(port), LC_BOARD_DIR: data, LC_TMUX_SESSION: '' }, stdio: 'ignore' });
+  const server = spawn('node', [join(KIT, 'board/server.mjs'), repo], { env: { ...process.env, PATH: `${fake}:${process.env.PATH}`, LC_BOARD_PORT: String(port), LC_BOARD_DIR: data, LC_TMUX_SESSION: '', LC_BOARD_TELL_RETRY: '1' }, stdio: 'ignore' });
   const url = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 50; i++) {
     try {
@@ -67,11 +67,26 @@ test('the board process tells the lead each new answer with lc-tell lead; answer
     for (let i = 0; i < 50 && !existsSync(log); i++) await sleep(100);
     assert.match(readFileSync(log, 'utf8'), /^\S+ \S+\tboard\torch\tboard answer to q1 \(Ship it\?\): Yes: after the tests$/m);
     assert.doesNotMatch(readFileSync(log, 'utf8'), /q0/);
-    assert.match(b.calls(), /^send-keys -t agents:orch -l from board: board answer to q1/m);
+    assert.match(b.calls(), /^send-keys -t @1 -l from board: board answer to q1/m);
     // A line another writer appends is told too.
     writeFileSync(join(b.data, 'answers.jsonl'), `${JSON.stringify({ id: 'q1', choice: 1, text: '', at: 't' })}\n`, { flag: 'a' });
     for (let i = 0; i < 50 && !/: No$/m.test(readFileSync(log, 'utf8')); i++) await sleep(100);
     assert.match(readFileSync(log, 'utf8'), /board answer to q1 \(Ship it\?\): No$/m);
+  } finally {
+    b.stop();
+  }
+});
+
+test('an answer whose tell failed is told again once the lead has a window', async () => {
+  const b = await board();
+  try {
+    writeFileSync(join(b.fake, 'nowin'), '');
+    await fetch(`${b.url}/api/answer`, { method: 'POST', headers: { 'content-type': 'application/json', origin: b.url }, body: JSON.stringify({ id: 'q1', choice: 1, text: '' }) });
+    await sleep(1500);
+    assert.doesNotMatch(b.calls(), /send-keys/);
+    rmSync(join(b.fake, 'nowin'));
+    for (let i = 0; i < 50 && !/send-keys/.test(b.calls()); i++) await sleep(100);
+    assert.match(b.calls(), /^send-keys -t @1 -l from board: board answer to q1 \(Ship it\?\): No$/m);
   } finally {
     b.stop();
   }

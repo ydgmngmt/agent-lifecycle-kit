@@ -16,6 +16,7 @@ session=${LC_TMUX_SESSION:-$(lc_conf "$PWD" tmux_session agents)}
 if [[ ${1:-} == resume ]]; then
   [[ $# -eq 2 ]] || usage
   name=$2
+  [[ $name == gate-* ]] && { echo "lc-park: $name is a gate session; lc-gate run --rerun starts it again" >&2; exit 1; }
   IFS=$'\t' read -r brief dir <<<"$(spawned "$name")"
   [[ -n ${brief:-} ]] || { echo "lc-park: no brief for $name in spawned.tsv" >&2; exit 1; }
   resume=${brief%.md}.resume.md
@@ -27,6 +28,8 @@ if [[ ${1:-} == resume ]]; then
 fi
 [[ $# -eq 3 && $2 == --resume && -n $3 ]] || usage
 name=$1
+# A gate session runs as its gate step, on the gate's model: lc-gate run starts it again, never lc-park.
+[[ $name == gate-* ]] && { echo "lc-park: $name is a gate session; lc-close it and lc-gate run --rerun starts it again" >&2; exit 1; }
 IFS=$'\t' read -r brief dir <<<"$(spawned "$name")"
 [[ -n ${brief:-} ]] || { echo "lc-park: no brief for $name in spawned.tsv; only a session lc-spawn started can be parked" >&2; exit 1; }
 resume=${brief%.md}.resume.md

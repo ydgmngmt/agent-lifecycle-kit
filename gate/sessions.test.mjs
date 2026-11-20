@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,7 +28,7 @@ function fixture(yaml) {
   writeFileSync(join(fake, 'tmux'), `#!/usr/bin/env bash
 printf '%s\\n' "$*" >>"${fake}/calls"
 case "$1" in
-  list-windows) cat "${fake}/windows" 2>/dev/null ;;
+  list-windows) [ -f "${fake}/fail" ] && { echo 'lost server' >&2; exit 1; }; cat "${fake}/windows" 2>/dev/null ;;
   capture-pane) cat "${fake}/pane" 2>/dev/null ;;
   new-window|new-session) n=$(cat "${fake}/n" 2>/dev/null || echo 6); n=$((n + 1)); echo $n >"${fake}/n"; echo @$n ;;
   send-keys) if [ -s "${fake}/drop" ]; then d=$(cat "${fake}/drop"); [ "$d" -gt 1 ] && echo $((d - 1)) >"${fake}/drop" || : >"${fake}/drop"; else [ -e "${fake}/sticky" ] || echo working >"${fake}/pane"; fi ;;
@@ -49,6 +49,8 @@ exit 0
 }
 
 const SESSION = 'handoff_dir: $STATE\ngate_phase:\n  review: session q.md\n';
+// A brief older than lc-spawn's wait: its session had time to get a window.
+const ageBrief = (brief) => utimesSync(brief, new Date(Date.now() - 120_000), new Date(Date.now() - 120_000));
 
 test('a gate session runs on sessions.gate_model and gate_effort, opus and xhigh by default, not the lead\'s', () => {
   const f = fixture(SESSION);
@@ -157,9 +159,10 @@ test("a gate session's window is closed when its record lands, and run closes on
   const findings = join(f.repo, 'state/gates/phase/x/findings/review.md');
   writeFileSync(findings, '| Q1 | Is it right? | yes | q.md:1 | sound |\n');
   const env = { ...process.env, PATH: `${f.fake}:${KIT}bin:${process.env.PATH}`, LC_SESSION: 'gate-x-review', LC_GATE_STEP: 'phase/x/review', LC_CLOSE_DELAY: '0' };
+  f.windows('@7\tgate-x-review\n');
   const r = spawnSync('node', [GATE, 'record', 'phase', 'x', 'review', 'pass', '--evidence', findings, '--candidate', 'HEAD'], { cwd: f.repo, encoding: 'utf8', env });
   assert.equal(r.status, 0, r.stderr);
-  const closed = () => /^kill-window -t agents:gate-x-review$/m.test(f.calls());
+  const closed = () => /^kill-window -t @7$/m.test(f.calls());
   for (let i = 0; i < 40 && !closed(); i++) await new Promise((ok) => setTimeout(ok, 100));
   assert.ok(closed(), f.calls());
   const g = fixture(SESSION);
@@ -168,7 +171,7 @@ test("a gate session's window is closed when its record lands, and run closes on
   g.windows('@7\tgate-x-review\n');
   g.sh(`mkdir -p state/gates/phase/x/records && printf '%s' '{"step":"review","status":"pass","sha":"'$(git rev-parse HEAD)'","by":"gate-x-review","at":"t","spawned":true}' > state/gates/phase/x/records/review.json`);
   const run = g.lc('run', 'phase', 'x');
-  assert.match(g.calls(), /^kill-window -t agents:gate-x-review$/m, run.stdout);
+  assert.match(g.calls(), /^kill-window -t @7$/m, run.stdout);
   assert.match(run.stdout, /closed its window gate-x-review/);
 });
 
@@ -426,9 +429,13 @@ test('a session gone with no window and no record is started again once; the sec
   f.pane('working\n');
   assert.match(f.lc('run', 'phase', 'x', '--base', 'HEAD').stdout, /started session gate-x-review on/);
   writeFileSync(join(f.repo, 'state/gates/phase/x/findings/review.md'), 'half a table');
+  const brief = join(f.repo, 'state/gates/phase/x/briefs', `review-${f.sh('git rev-parse --short=12 HEAD')}.md`);
+  assert.match(f.lc('run', 'phase', 'x').stdout, /session gate-x-review has no window yet, started \d+s ago/);
+  ageBrief(brief);
   const again = f.lc('run', 'phase', 'x');
   assert.match(again.stdout, /started session gate-x-review again: it was gone with no window and no record \(once\)/, again.stdout + again.stderr);
   assert.ok(existsSync(join(f.repo, `state/gates/phase/x/findings/review.gone-${f.sh('git rev-parse --short=12 HEAD')}.md`)));
+  ageBrief(brief);
   const third = f.lc('run', 'phase', 'x');
   assert.match(third.stdout, /session gate-x-review ended without a record, also after one start again; start it again with --rerun review/);
   assert.equal(f.calls().split('\n').filter((l) => l.startsWith('new-')).length, 2);
@@ -458,7 +465,7 @@ test('sessions.gate_flags replaces sessions.agent_flags for the sessions lc-gate
   f.pane('working\n');
   f.lc('run', 'phase', 'x', '--base', 'HEAD');
   const started = f.calls().split('\n').find((l) => l.startsWith('new-'));
-  assert.ok(started.includes(`claude --strict-mcp-config --plugin-dir ${KIT.replace(/\/$/, '')} `), started);
+  assert.ok(started.includes(`claude --strict-mcp-config --plugin-dir \\'${KIT.replace(/\/$/, '')}\\' `) || started.includes(`claude --strict-mcp-config --plugin-dir '${KIT.replace(/\/$/, '')}' `), started);
   assert.doesNotMatch(started, /--wide-open/);
   const g = fixture(`${SESSION}sessions:\n  agent_flags: --wide-open\n`);
   g.pane('working\n');
@@ -484,7 +491,7 @@ test('lc-tell logs the line and types it into the receiver\'s window; lead is se
   f.windows('@3\torch\n@4\timpl\n');
   const r = f.bin('lc-tell', ['lead', 'PR feat holds'], { LC_SESSION: 'impl' });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(f.calls(), /^send-keys -t agents:orch -l from impl: PR feat holds\nsend-keys -t agents:orch Enter$/m);
+  assert.match(f.calls(), /^send-keys -t @3 -l from impl: PR feat holds\nsend-keys -t @3 Enter$/m);
   assert.match(readFileSync(join(f.repo, 'state/tell.log'), 'utf8'), /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\timpl\torch\tPR feat holds$/m);
   const gone = f.bin('lc-tell', ['nobody', 'hello'], { LC_SESSION: 'impl' });
   assert.equal(gone.status, 1);
@@ -506,11 +513,11 @@ test('lc-park writes the resume point beside the brief and closes the window; lc
   f.pane('working\n');
   mkdirSync(join(f.repo, 'state/board'), { recursive: true });
   assert.equal(f.spawn(f.repo, f.repo).status, 0);
+  f.windows('@7\ts1\n');
   const p = f.bin('lc-park', ['s1', '--resume', 'waits for the parent PR; then rerun the gate']);
   assert.equal(p.status, 0, p.stderr);
   assert.match(readFileSync(join(f.repo, 'q.resume.md'), 'utf8'), /waits for the parent PR; then rerun the gate/);
-  assert.match(f.calls(), /^kill-window -t agents:s1$/m);
-  f.windows('@7\ts1\n');
+  assert.match(f.calls(), /^kill-window -t @7$/m);
   assert.match(f.bin('lc-park', ['resume', 's1']).stderr, /still has a window/);
   f.windows('');
   const r = f.bin('lc-park', ['resume', 's1']);
@@ -518,4 +525,95 @@ test('lc-park writes the resume point beside the brief and closes the window; lc
   const started = f.calls().split('\n').filter((l) => l.startsWith('new-')).at(-1);
   assert.match(started, /resume\\ point\\ in\\ .*q\.resume\.md/);
   assert.match(f.bin('lc-park', ['resume', 'nobody']).stderr, /no brief for nobody/);
+});
+
+test('an amend after each FAIL is a follow-up review too: sessions.gate_rounds stops it', () => {
+  const f = fixture(`${SESSION}sessions:\n  gate_rounds: 1\n`);
+  f.pane('working\n');
+  f.sh('git commit -q --allow-empty -m work');
+  assert.match(f.lc('run', 'phase', 'x', '--base', 'HEAD~1', '--candidate', 'HEAD').stdout, /started session/);
+  failAt(f, f.sh('git rev-parse HEAD'));
+  f.sh('git commit -q --amend --allow-empty -m work2');
+  assert.match(f.lc('run', 'phase', 'x', '--candidate', 'HEAD').stdout, /started session/);
+  failAt(f, f.sh('git rev-parse HEAD'));
+  f.sh('git commit -q --amend --allow-empty -m work3');
+  const r = f.lc('run', 'phase', 'x', '--candidate', 'HEAD');
+  assert.match(r.stdout, /1 follow-up review\(s\) ended in FAIL \(sessions\.gate_rounds 1\): no further session/, r.stdout + r.stderr);
+  assert.equal(f.calls().split('\n').filter((l) => l.startsWith('new-')).length, 2);
+});
+
+test('a start that failed, or a rerun on the same commit, is not counted as a round', () => {
+  const f = fixture(SESSION);
+  f.pane('working\n');
+  f.lc('run', 'phase', 'x', '--base', 'HEAD');
+  failAt(f, f.sh('git rev-parse HEAD'));
+  f.sh('git commit -q --allow-empty -m fix1');
+  writeFileSync(join(f.repo, '.agents/project.yaml'), `${SESSION.replace('$STATE', `${f.repo}/state`)}sessions:\n  memory_floor_mb: 99999999\n`);
+  for (const i of [1, 2]) assert.match(f.lc('run', 'phase', 'x', '--candidate', 'HEAD').stdout, /review\s+session\s+not started/, `try ${i}`);
+  f.sh('git checkout -q .agents/project.yaml');
+  assert.match(f.lc('run', 'phase', 'x', '--candidate', 'HEAD').stdout, /started session/);
+  assert.match(f.lc('run', 'phase', 'x', '--rerun', 'review').stdout, /started session/);
+  failAt(f, f.sh('git rev-parse HEAD'));
+  f.sh('git commit -q --allow-empty -m fix2');
+  const r = f.lc('run', 'phase', 'x', '--candidate', 'HEAD');
+  assert.match(r.stdout, /started session/, r.stdout + r.stderr);
+  assert.match(f.lc('status', 'phase', 'x').stdout, /sessions\.gate_rounds 2\): review 1/);
+});
+
+test('no gone restart while tmux does not answer, nor after lc-close closed the session', () => {
+  const f = fixture(SESSION);
+  f.pane('working\n');
+  mkdirSync(join(f.repo, 'state/board'), { recursive: true });
+  f.lc('run', 'phase', 'x', '--base', 'HEAD');
+  const brief = join(f.repo, 'state/gates/phase/x/briefs', `review-${f.sh('git rev-parse --short=12 HEAD')}.md`);
+  ageBrief(brief);
+  writeFileSync(join(f.fake, 'fail'), '');
+  assert.match(f.lc('run', 'phase', 'x').stdout, /tmux did not answer: cannot tell whether session gate-x-review still runs/);
+  rmSync(join(f.fake, 'fail'));
+  assert.equal(f.bin('lc-close', ['gate-x-review']).status, 0);
+  const r = f.lc('run', 'phase', 'x');
+  assert.match(r.stdout, /session gate-x-review was closed \(lc-close\) with no record; start it again with --rerun review/, r.stdout + r.stderr);
+  assert.equal(f.calls().split('\n').filter((l) => l.startsWith('new-')).length, 1);
+});
+
+test('lc-tell and lc-close address a window by its id: a name with a dot is not read as a pane', () => {
+  const f = fixture('handoff_dir: $STATE\n');
+  f.windows('@1\trel-1\n@2\trel-1.0\n');
+  assert.equal(f.bin('lc-tell', ['rel-1.0', 'meant for rel-1.0']).status, 0);
+  assert.match(f.calls(), /^send-keys -t @2 -l from .*: meant for rel-1\.0$/m);
+  f.bin('lc-close', ['rel-1.0']);
+  assert.match(f.calls(), /^kill-window -t @2$/m);
+  assert.doesNotMatch(f.calls(), /kill-window -t (@1|agents:)/);
+});
+
+test('lc-tell leaves the line in the log when the window has unsent text in its input line', () => {
+  const f = fixture('handoff_dir: $STATE\n');
+  f.windows('@1\tlead-x\n');
+  f.pane('done\n────\n❯ owner half typed\n────\n');
+  const r = f.bin('lc-tell', ['lead-x', 'an answer']);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /lead-x has unsent text in its input line \(owner half typed\); the line is only in/);
+  assert.doesNotMatch(f.calls(), /send-keys/);
+  f.pane('done\n────\n❯ \n────\n');
+  assert.equal(f.bin('lc-tell', ['lead-x', 'an answer']).status, 0);
+  assert.match(f.calls(), /^send-keys -t @1 -l /m);
+});
+
+test('lc-park refuses a gate session: lc-gate run starts those', () => {
+  const f = fixture(SESSION);
+  assert.match(f.bin('lc-park', ['gate-x-review', '--resume', 'p']).stderr, /gate-x-review is a gate session/);
+  assert.match(f.bin('lc-park', ['resume', 'gate-x-review']).stderr, /is a gate session/);
+});
+
+test("a retargeted PR: the runner's if N/As are decided again on the new base", () => {
+  const f = fixture('handoff_dir: $STATE\npaths:\n  db: db/\ngate_pr:\n  migrate: command false if db\n');
+  writeFileSync(join(f.fake, 'gh'), `#!/bin/sh\ncat "${f.fake}/base.json"\n`, { mode: 0o755 });
+  writeFileSync(join(f.fake, 'base.json'), '{"baseRefName":"parent"}');
+  f.sh('git remote add origin /nowhere && git checkout -q -b parent && mkdir db && echo m > db/m.sql && git add db && git commit -qm parent && git update-ref refs/remotes/origin/parent HEAD');
+  f.sh('git checkout -q -b feat && echo f > f.txt && git add f.txt && git commit -qm feat');
+  assert.match(f.lc('run', 'pr', 'feat').stdout, /migrate\s+command\s+N\/A \(no file changed/);
+  writeFileSync(join(f.fake, 'base.json'), '{"baseRefName":"main"}');
+  const r = f.lc('run', 'pr', 'feat');
+  assert.match(r.stdout, /the base branch moved from parent to main/, r.stdout + r.stderr);
+  assert.match(r.stdout, /migrate\s+command\s+FAIL/);
 });

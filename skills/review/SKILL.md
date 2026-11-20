@@ -27,4 +27,4 @@ Read-only: write only your findings file, and a live session's screenshots, trac
    Every P1 and P2 names `path:line` and the case that fails. An item's tag is its findings' level unless P1; an older `(must-fix)` is P2, `(comment)` P3. Ask the owner only for a decision on product meaning, scope, access or spend the docs don't settle. A defect is never "sound".
 7. **Findings** follow the table, each in [finding.md](../lifecycle/finding.md). Invent nothing; a clean result is valid.
 8. **Record** with the brief's line: `fail` when any row is P1 or P2, else `pass`, however many P3; `lc-gate record` refuses a pass with one.
-9. **Send** with `lc-tell <session|lead> "<line>"`: a P1 to the lead at once; the findings file's path to the implementer and the lead for a PR, the lead for a phase. Then stop.
+9. **Send** with `lc-tell <session|lead> "<line>"`: a P1 to the lead at once; the findings file's path to the lead (the implementer's `--wait` returns on your record). Then stop.

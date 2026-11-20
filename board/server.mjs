@@ -332,44 +332,64 @@ const afterwards = async () =>
   }).reverse();
 
 // Tells the lead each answer added to answers.jsonl since the offset in answers.told (from the end of
-// the file the first time), with lc-tell lead, as session "board".
-function tellAnswers() {
-  const path = join(dataDir, 'answers.jsonl');
-  const told = join(dataDir, 'answers.told');
+// the file the first time), with lc-tell lead, as session "board", one at a time: the offset moves past
+// a line only once its tell went through, so a failed one is tried again (on the next change, or every
+// LC_BOARD_TELL_RETRY seconds, 30).
+let telling = false;
+let again = false;
+async function tellAnswers() {
+  if (telling) {
+    again = true;
+    return;
+  }
   if (!existsSync(dataDir)) return;
-  const size = existsSync(path) ? statSync(path).size : 0;
-  let from = existsSync(told) ? Number(readFileSync(told, 'utf8')) || 0 : size;
-  if (size < from) from = 0;
-  if (size > from) {
+  telling = true;
+  try {
+    const path = join(dataDir, 'answers.jsonl');
+    const told = join(dataDir, 'answers.told');
+    const size = existsSync(path) ? statSync(path).size : 0;
+    let from = existsSync(told) ? Number(readFileSync(told, 'utf8')) || 0 : size;
+    if (size < from) from = 0;
+    writeFileSync(told, String(from));
+    if (size <= from) return;
     const buf = Buffer.alloc(size - from);
     const fd = openSync(path, 'r');
     readSync(fd, buf, 0, buf.length, from);
     closeSync(fd);
     const chunk = buf.toString('utf8');
-    const whole = chunk.slice(0, chunk.lastIndexOf('\n') + 1);
-    from += Buffer.byteLength(whole);
     let qs = [];
     try {
       qs = JSON.parse(readFileSync(join(dataDir, 'questions.json'), 'utf8'));
     } catch {
       // no questions file: the id alone
     }
-    for (const line of whole.split('\n').filter(Boolean)) {
-      let a;
+    for (const line of chunk.slice(0, chunk.lastIndexOf('\n') + 1).split(/(?<=\n)/)) {
+      let a = null;
       try {
         a = JSON.parse(line);
       } catch {
-        continue;
+        // not an answer: skipped
       }
-      const q = qs.find((x) => x.id === a.id);
-      const choice = a.choice != null ? q?.options?.[a.choice]?.label : null;
-      const said = `board answer to ${a.id}${q?.title ? ` (${q.title})` : ''}: ${[choice, a.text?.trim()].filter(Boolean).join(': ') || '(empty)'}`;
-      execFile(join(here, '../bin/lc-tell'), ['lead', said], { cwd: repo, timeout: 20_000, env: { ...process.env, LC_SESSION: 'board' } }, (err, _out, errOut) => {
-        if (err) console.error(`lc-tell lead failed for ${a.id}: ${String(errOut || err.message).trim()}`);
-      });
+      if (a) {
+        const q = qs.find((x) => x.id === a.id);
+        const choice = a.choice != null ? q?.options?.[a.choice]?.label : null;
+        const said = `board answer to ${a.id}${q?.title ? ` (${q.title})` : ''}: ${[choice, a.text?.trim()].filter(Boolean).join(': ') || '(empty)'}`;
+        const err = await new Promise((done) => execFile(join(here, '../bin/lc-tell'), ['lead', said], { cwd: repo, timeout: 60_000, env: { ...process.env, LC_SESSION: 'board' } }, (e, _out, errOut) => done(e ? String(errOut || e.message).trim() : null)));
+        if (err) {
+          console.error(`lc-tell lead failed for ${a.id}; tried again later: ${err}`);
+          return;
+        }
+      }
+      from += Buffer.byteLength(line);
+      writeFileSync(told, String(from));
+    }
+  } finally {
+    telling = false;
+    if (again) {
+      again = false;
+      setTimeout(() => tellAnswers().catch((err) => console.error(err)), 0);
     }
   }
-  writeFileSync(told, String(from));
 }
 
 // The step rows of the gates run most recently (gate/gate.mjs); a broken gate file never breaks the page.
@@ -481,8 +501,10 @@ createServer((req, res) =>
     if (!res.headersSent) send(res, 500, 'text/plain', 'board error; see server.log');
   }),
 ).listen(port, '127.0.0.1', () => console.log(`ADLC board on http://localhost:${port} (data ${dataDir})`));
-tellAnswers();
-watchFile(join(dataDir, 'answers.jsonl'), { interval: 1000 }, tellAnswers);
+const tellNow = () => tellAnswers().catch((err) => console.error(err));
+tellNow();
+watchFile(join(dataDir, 'answers.jsonl'), { interval: 1000 }, tellNow);
+setInterval(tellNow, Math.max(1, Number(process.env.LC_BOARD_TELL_RETRY) || 30) * 1000);
 
 async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
@@ -506,7 +528,7 @@ async function handle(req, res) {
     if (typeof body.id !== 'string') return send(res, 400, 'text/plain', 'missing id');
     const entry = { id: body.id, choice: Number.isInteger(body.choice) ? body.choice : null, text: String(body.text ?? ''), at: new Date().toISOString() };
     await appendFile(join(dataDir, 'answers.jsonl'), JSON.stringify(entry) + '\n');
-    tellAnswers();
+    tellAnswers().catch((err) => console.error(err));
     return send(res, 200, 'application/json', '{"ok":true}');
   }
   send(res, 404, 'text/plain', 'not found');

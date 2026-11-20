@@ -285,7 +285,9 @@ export function prCurrent(repo, head, { main = mainRef(repo), conf = null } = {}
     const commits = between(sha);
     if (!commits) return false;
     if (commits.every((c) => ofMain(c) && resolved(c.commit)?.length === 0)) return true;
-    return Boolean(conf && step?.kind === 'command' && step.if) && !matchesPaths(conf, step.if, ownFiles(commits));
+    // An own change to the project file may move the paths themselves: the record does not hold.
+    const own = Boolean(conf && step?.kind === 'command' && step.if) && ownFiles(commits);
+    return Boolean(own) && !own.includes('.agents/project.yaml') && !matchesPaths(conf, step.if, own);
   };
 }
 
@@ -431,7 +433,7 @@ function record(repo, [gate, id, step, status, planStatus], flags) {
 
 // Closes a finished gate session's tmux window (lc-close).
 function closeWindow(cfg, name) {
-  exec(join(KIT, 'bin/lc-close'), [name], { ok: true, timeout: 10_000, env: { ...process.env, LC_TMUX_SESSION: cfg.tmuxSession || 'agents' } });
+  exec(join(KIT, 'bin/lc-close'), [name], { cwd: cfg.repo, ok: true, timeout: 30_000, env: { ...process.env, LC_TMUX_SESSION: cfg.tmuxSession || 'agents' } });
 }
 
 // `record <gate> <id> <step> plan --evidence <file>`: the plan of a step whose line ends in `plan`,
@@ -479,13 +481,20 @@ function keepHistory(s, old, rec) {
 
 // A session step's reviews, from rounds.json ({ sha, followUp, at, lead? } per started session), each
 // with the status its session ended in: the first record at its commit made after it started.
+// Each record settles one entry: the latest still open at its commit that started before it.
 export function reviewRounds(list, rec) {
   const outcomes = rec ? [...(rec.history ?? []), rec].filter((o) => o.status && !o.lead) : [];
-  return (Array.isArray(list) ? list : []).map((e) => {
-    if (e.status) return e;
-    const o = outcomes.find((x) => x.sha === e.sha && !(Date.parse(x.at) < Date.parse(e.at)));
-    return o ? { ...e, status: o.status } : e;
-  });
+  const out = (Array.isArray(list) ? list : []).map((e) => ({ ...e }));
+  const used = new Set(out.map((e) => e.settled).filter(Boolean));
+  for (const o of outcomes) {
+    const key = `${o.sha}@${o.at}`;
+    if (used.has(key)) continue;
+    const e = out.filter((x) => !x.status && x.sha === o.sha && !(Date.parse(x.at) > Date.parse(o.at))).at(-1);
+    if (!e) continue;
+    Object.assign(e, { status: o.status, settled: key });
+    used.add(key);
+  }
+  return out;
 }
 const failedFollowUps = (reviews) => reviews.filter((e) => e.followUp && e.status === 'fail').length;
 // sessions.gate_rounds: how many follow-up reviews of a step may end in FAIL before the lead decides.
@@ -571,9 +580,9 @@ async function run(repo, args, flags) {
     return w.code;
   }
   const limit = Number(process.env.LC_GATE_WAIT || 1500);
-  const poll = Number(process.env.LC_GATE_WAIT_POLL || 30);
+  const poll = Math.max(1, Number(process.env.LC_GATE_WAIT_POLL) || 30);
   const started = Date.now();
-  const again = { ...flags, rerun: undefined, lead: false };
+  const again = { ...flags, rerun: undefined, lead: false, again: true };
   let lines = [];
   while (Date.now() - started < limit * 1000) {
     await sleep(Math.min(poll * 1000, started + limit * 1000 - Date.now()));
@@ -634,13 +643,13 @@ function prBase(repo, cfg, id, sha) {
   }
   if (name && !isMainBranch(repo, name)) {
     const ref = [`refs/remotes/origin/${name}`, `refs/heads/${name}`].find((x) => exec('git', ['-C', repo, 'rev-parse', '--verify', '-q', `${x}^{commit}`], { ok: true }).status === 0);
-    if (ref) return { base: git(repo, 'merge-base', ref, sha), note: `base: the merge-base with ${name}, the PR's base branch on the host` };
-    return { base: git(repo, 'merge-base', main, sha), note: `the PR's base branch ${name} is not here (git fetch origin ${name}); base: the default branch` };
+    if (ref) return { base: git(repo, 'merge-base', ref, sha), branch: name, note: `base: the merge-base with ${name}, the PR's base branch on the host` };
+    return { base: git(repo, 'merge-base', main, sha), branch: defaultBranch(repo), note: `the PR's base branch ${name} is not here (git fetch origin ${name}); base: the default branch` };
   }
   const base = git(repo, 'merge-base', main, sha);
-  if (name) return { base, note: '' };
+  if (name) return { base, branch: name, note: '' };
   const stacked = otherGates(cfg, id).filter(([, tip]) => isAncestor(repo, tip, sha) && !isAncestor(repo, tip, base)).map(([o]) => o);
-  return { base, note: stacked.length ? `no PR on the host says this branch's base, and its diff to the default branch holds commits of ${stacked.join(', ')}, a branch with a gate: pass --base ${stacked[0]}, or open the PR with --base ${stacked[0]}` : '' };
+  return { base, branch: defaultBranch(repo), note: stacked.length ? `no PR on the host says this branch's base, and its diff to the default branch holds commits of ${stacked.join(', ')}, a branch with a gate: pass --base ${stacked[0]}, or open the PR with --base ${stacked[0]}` : '' };
 }
 
 // One walk of the gate. { code, done: every step holds, inflight: something runs that can change a step
@@ -649,7 +658,11 @@ async function walk(repo, [gate, idArg], flags) {
   const id = idArg ?? (gate === 'pr' ? branchId(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')) : undefined);
   const g = load(repo, gate, id);
   const sha = flags.candidate ? verify(repo, flags.candidate) : gate === 'phase' && g.state.candidate ? g.state.candidate : verify(repo, 'HEAD');
-  const { base, note } = flags.base ? { base: verify(repo, flags.base) } : gate === 'pr' ? prBase(repo, g.cfg, id, sha) : { base: g.state.base };
+  const { base, note, branch } = flags.base ? { base: verify(repo, flags.base), branch: gate === 'pr' ? flags.base : undefined } : gate === 'pr' ? prBase(repo, g.cfg, id, sha) : { base: g.state.base };
+  // A PR's records are judged against its base branch: when it moved (a retarget), the runner's own
+  // `if` N/As are decided again, and lc-gate merge refuses until a walk has seen the new base.
+  const baseMoved = Boolean(branch && g.state.baseBranch && g.state.baseBranch !== branch && !(isMainBranch(repo, branch) && isMainBranch(repo, g.state.baseBranch)));
+  if (baseMoved) console.log(`the base branch moved from ${g.state.baseBranch} to ${branch}: the runner's if N/As are decided again`);
   if (!base) die(`the phase gate's first run needs --base <main before the phase's first merge>`);
   const current = currentFor(g, gate, sha);
   if (g.state.candidate && g.state.candidate !== sha) {
@@ -658,7 +671,7 @@ async function walk(repo, [gate, idArg], flags) {
     const not = had.filter((s) => !holds.includes(s.id)).map((s) => s.id);
     console.log(`new candidate ${sha.slice(0, 12)} (was ${g.state.candidate.slice(0, 12)}): ${holds.length ? `records that hold: ${holds.join(', ')}` : 'no record holds'}; ${not.length ? `that do not: ${not.join(', ')} (each reruns, or the lead carries it with lc-gate record … --carry --reason)` : 'none that does not'}`);
   }
-  writeJson(join(g.dir, 'gate.json'), { gate, id, candidate: sha, base });
+  writeJson(join(g.dir, 'gate.json'), { gate, id, candidate: sha, base, ...(branch ? { baseBranch: branch } : {}) });
   // The evidence folder's git-only part, whatever the freeze step does (templates/phase-review.md).
   const evidence = join(g.dir, 'evidence');
   mkdirSync(evidence, { recursive: true });
@@ -681,6 +694,7 @@ async function walk(repo, [gate, idArg], flags) {
   const rerun = new Set((flags.rerun ?? '').split(',').filter(Boolean));
   for (const x of rerun) if (!g.steps.some((s) => s.id === x)) die(`--rerun ${x}: no such step`);
   ctx.rerun = rerun;
+  ctx.again = Boolean(flags.again);
   ctx.lead = flags.lead ? { reason: flags.reason.trim() } : null;
   ctx.rounds = roundsLimit(g.cfg.conf);
   let above = true; // every step above has a record for the candidate
@@ -694,6 +708,7 @@ async function walk(repo, [gate, idArg], flags) {
   const held = {}; // this walk's record that holds, per step above
   for (const s of g.steps) {
     let r = g.records[s.id] && current(g.records[s.id].sha, s) && !rerun.has(s.id) ? g.records[s.id] : null;
+    if (baseMoved && r?.by === 'lc-gate' && r.status === 'na') r = null;
     const old = g.records[s.id];
     if (s.plan && !g.records[`${s.id}.plan`] && r?.status !== 'na' && !(s.if && !touches(s.if))) {
       commits ??= Number(git(repo, 'rev-list', '--count', `${base}..${sha}`));
@@ -714,7 +729,7 @@ async function walk(repo, [gate, idArg], flags) {
     if (r && s.kind === 'session' && liveWindow(g.cfg, sessionName(ctx, s))) {
       closeWindow(g.cfg, sessionName(ctx, s));
       say(ctx, s, `${label(r)}, by ${r.by}; closed its window ${sessionName(ctx, s)}`);
-    } else if (r && !(['command', 'checks'].includes(s.kind) && r.status === 'fail' && !waits)) say(ctx, s, `${label(r)}, by ${r.by}${r.reason ? ` (${r.reason})` : ''}`);
+    } else if (r && !((s.kind === 'checks' || (s.kind === 'command' && !ctx.again)) && r.status === 'fail' && !waits)) say(ctx, s, `${label(r)}, by ${r.by}${r.reason ? ` (${r.reason})` : ''}`);
     else if (!r && s.if && !touches(s.if)) r = put(ctx, s, 'na', '', `no file changed between ${base.slice(0, 12)} and ${sha.slice(0, 12)} matches paths.${s.if}`, 'lc-gate');
     else if (s.kind === 'session' && old && !rerun.has(s.id) && !waits && !followUp) {
       say(ctx, s, `stale: ${label(old)} for ${old.sha.slice(0, 12)}. Rerun it with lc-gate run ${gate} ${id} --rerun ${s.id}, or carry it with lc-gate record ${gate} ${id} ${s.id} pass --carry --reason …`);
@@ -743,7 +758,7 @@ async function walk(repo, [gate, idArg], flags) {
   for (const s of g.steps) {
     const x = records[s.id];
     const brief = join(g.dir, 'briefs', `${s.id}-${sha.slice(0, 12)}.md`);
-    state[s.id] = [x ? `${x.status}@${x.sha}@${x.at}` : '-',
+    state[s.id] = [x ? `${x.status}@${x.sha}${x.by === 'lc-gate' ? '' : `@${x.at}`}` : '-',
       s.kind === 'session' ? `${liveWindow(g.cfg, sessionName(ctx, s)) ? 'live' : 'none'} ${existsSync(brief) ? 'brief' : ''} ${existsSync(`${brief}.restarted`) ? 'restarted' : ''}` : '',
       ['checks', 'workflow', 'owner'].includes(s.kind) ? ctx.notes[s.id] ?? '' : ''].join(' ');
   }
@@ -764,15 +779,33 @@ function prBrief(ctx) {
 
 const sessionName = (ctx, s) => `gate-${ctx.id}-${s.id}`.replace(/[^\w.-]/g, '-');
 
-// The id of lc-spawn's tmux window of this name, else null.
-function liveWindow(cfg, name) {
+// The id of lc-spawn's tmux window of this name; null when there is none; undefined when tmux did not
+// answer (a timeout, an error other than no server or no session), so nobody can tell.
+function windowOf(cfg, name) {
+  let r;
   try {
-    const r = exec('tmux', ['list-windows', '-t', cfg.tmuxSession || 'agents', '-F', '#{window_id}\t#W'], { ok: true, timeout: 10_000 });
-    return r.status === 0 ? (r.stdout.split('\n').map((l) => l.split('\t')).find((w) => w[1] === name)?.[0] ?? null) : null;
+    r = exec('tmux', ['list-windows', '-t', cfg.tmuxSession || 'agents', '-F', '#{window_id}\t#W'], { ok: true, timeout: 10_000 });
   } catch {
-    return null;
+    return undefined;
   }
+  if (r.status) return /can't find session|no server running|error connecting/i.test(r.stderr) ? null : undefined;
+  return r.stdout.split('\n').map((l) => l.split('\t')).find((w) => w[1] === name)?.[0] ?? null;
 }
+const liveWindow = (cfg, name) => windowOf(cfg, name) ?? null;
+
+// The default branch's name: origin/HEAD's, else main.
+function defaultBranch(repo) {
+  const r = exec('git', ['-C', repo, 'symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD'], { ok: true, timeout: FAST });
+  return r.stdout.trim().replace(/^origin\//, '') || 'main';
+}
+
+// When lc-close last closed a window of this name (<data dir>/closed.tsv, name and epoch seconds), in ms.
+function closedAt(cfg, name) {
+  const file = join(cfg.dataDir, 'closed.tsv');
+  if (!existsSync(file)) return 0;
+  return Math.max(0, ...readFileSync(file, 'utf8').split('\n').map((l) => l.split('\t')).filter((c) => c[0] === name).map((c) => Number(c[1]) * 1000 || 0));
+}
+const SPAWN_WAIT = 60_000; // lc-spawn's own timeout: a younger brief may still be getting its window
 
 // A started session's activity: its window's text changing. briefs/<step>.seen.json keeps the last
 // look; unchanged for IDLE, the session is reported with the window's last line (a prompt it waits on).
@@ -895,15 +928,29 @@ const STEP = {
     const name = sessionName(ctx, s);
     const brief = join(ctx.dir, 'briefs', `${s.id}-${ctx.sha.slice(0, 12)}.md`);
     // One session per step at a time: a live one (for this candidate or an earlier one) is waited for.
-    const window = liveWindow(ctx.cfg, name);
+    const window = windowOf(ctx.cfg, name);
     if (window) {
       const idle = idleNote(ctx, s, window);
       ctx.inflight = true;
       return say(ctx, s, `session ${name} is running; waiting for its record (lc-close ${name} to stop it)${idle && `\n    ${name} ${idle}`}`);
     }
-    // A session started for this candidate that is gone (no window, no record) is started again once.
+    // A session started for this candidate that is gone (no window, no record) is started again once:
+    // not while tmux does not answer, its window may still be coming (SPAWN_WAIT), or after lc-close.
     const gone = existsSync(brief);
-    if (gone && existsSync(`${brief}.restarted`)) return say(ctx, s, `session ${name} ended without a record, also after one start again; start it again with --rerun ${s.id}`);
+    if (gone) {
+      const again = `start it again with --rerun ${s.id}`;
+      if (window === undefined) {
+        ctx.inflight = true;
+        return say(ctx, s, `tmux did not answer: cannot tell whether session ${name} still runs`);
+      }
+      const age = Date.now() - statSync(brief).mtimeMs;
+      if (age < SPAWN_WAIT) {
+        ctx.inflight = true;
+        return say(ctx, s, `session ${name} has no window yet, started ${Math.round(age / 1000)}s ago`);
+      }
+      if (closedAt(ctx.cfg, name) >= statSync(brief).mtimeMs - 1000) return say(ctx, s, `session ${name} was closed (lc-close) with no record; ${again}`);
+      if (existsSync(`${brief}.restarted`)) return say(ctx, s, `session ${name} ended without a record, also after one start again; ${again}`);
+    }
     // A follow-up review: the step failed, or passed, at an earlier candidate this one descends from.
     const old = ctx.records[s.id];
     const before = (old?.status === 'fail' || old?.status === 'pass') && old.sha !== ctx.sha && exec('git', ['-C', ctx.repo, 'merge-base', '--is-ancestor', old.sha, ctx.sha], { ok: true }).status === 0 ? old : null;
@@ -941,14 +988,6 @@ const STEP = {
     // Commits on top of a pass: only they are reviewed.
     if (before?.status === 'pass') scope = `a review of the change since a pass. The step passed at \`${before.sha.slice(0, 12)}\`; ${own(before.sha)}. Review those lines as deep as the review skill asks; raise nothing in the rest, unless a P1 or P2 with its evidence.`;
     const at = new Date().toISOString();
-    const entry = { sha: ctx.sha, followUp: Boolean(before), at, ...(lead ? { lead: lead.reason } : {}) };
-    writeJson(roundsFile, { ...rounds, [s.id]: gone ? reviews : [...reviews, entry] });
-    if (gone) writeFileSync(`${brief}.restarted`, `${at}\n`);
-    // The lead's extra round goes into the step's record history, with its reason.
-    if (lead && old) {
-      const file = join(ctx.dir, 'records', `${s.id}.json`);
-      writeJson(file, { ...old, history: [...(old.history ?? []), { lead: true, sha: ctx.sha, reason: lead.reason, by: process.env.LC_SESSION || 'lead', at }].slice(-30) });
-    }
     const spec = ctx.gate !== 'pr' ? 'The spec: the inputs the question file names.'
       : ((b) => (b ? `The PR's brief: \`${b}\`; judge the change against it.` : "The PR's brief: none known; judge the change against the PR body."))(prBrief(ctx));
     const setup = ctx.cfg.conf['sessions.gate_setup'];
@@ -959,14 +998,23 @@ const STEP = {
     // sessions.gate_flags, on those agent flags in place of sessions.agent_flags (a lean start).
     const conf = ctx.cfg.conf;
     const env = { ...process.env, LC_GATE_STEP: `${ctx.gate}/${ctx.id}/${s.id}`, LC_MODEL: conf['sessions.gate_model'] || 'opus', LC_EFFORT: conf['sessions.gate_effort'] || 'xhigh' };
-    if (conf['sessions.gate_flags']) env.LC_AGENT_FLAGS = conf['sessions.gate_flags'].replaceAll('{kit}', KIT.replace(/\/$/, ''));
+    if (conf['sessions.gate_flags']) env.LC_AGENT_FLAGS = conf['sessions.gate_flags'].replaceAll('{kit}', `'${KIT.replace(/\/$/, '').replaceAll("'", "'\\''")}'`);
     let out;
     try {
       out = exec(join(KIT, 'bin/lc-spawn'), [name, ctx.repo, brief], { cwd: ctx.repo, timeout: 60_000, env }).stdout;
     } catch (err) {
       unlinkSync(brief); // the brief marks a started session; the next run tries again
-      rmSync(`${brief}.restarted`, { force: true });
       throw err;
+    }
+    // Counted once started: every review after the step's first is a follow-up, whatever its commit
+    // (an amend or a rebase does not reset the count); `before` decides only its scope.
+    const entry = { sha: ctx.sha, followUp: Boolean(old), at, ...(lead ? { lead: lead.reason } : {}) };
+    writeJson(roundsFile, { ...rounds, [s.id]: gone ? reviews : [...reviews, entry] });
+    if (gone) writeFileSync(`${brief}.restarted`, `${at}\n`);
+    // The lead's extra round goes into the step's record history, with its reason.
+    if (lead && old) {
+      const file = join(ctx.dir, 'records', `${s.id}.json`);
+      writeJson(file, { ...old, history: [...(old.history ?? []), { lead: true, sha: ctx.sha, reason: lead.reason, by: process.env.LC_SESSION || 'lead', at }].slice(-30) });
     }
     ctx.running++;
     ctx.inflight = true;
@@ -1739,6 +1787,9 @@ async function mergeLocked(repo, cfg, steps, mode, branch) {
   }
   const head = pr.headRefOid;
   const dir = gateDir(cfg, 'pr', id);
+  // The records were judged against the base branch the last walk saw; a PR retargeted since needs a walk.
+  const judged = readJson(join(dir, 'gate.json'), {}).baseBranch;
+  if (judged && judged !== pr.baseRefName && !(isMainBranch(repo, judged) && isMainBranch(repo, pr.baseRefName))) die(`the gate of ${pr.headRefName} was judged against ${judged}, but the PR's base is now ${pr.baseRefName}; nothing merged. Run lc-gate run pr ${id} again, then lc-gate merge pr ${id}`);
   // The checks step at this head: the host's verdict, waited for, is its record.
   const cs = steps.find((s) => s.kind === 'checks');
   if (cs) {
@@ -1794,7 +1845,7 @@ export function tally(repo, [gate], flags) {
       continue;
     }
     const qs = questions(shown ? shown.stdout : readFileSync(path, 'utf8'));
-    const mine = files.filter((f) => basename(f).split('.')[0] === s.id);
+    const mine = files.filter((f) => basename(f).split('.')[0] === s.id && !basename(f).includes('.gone-'));
     const counts = qs.map((q, i) => ({ step: s.id, q: `Q${i + 1}`, question: q, reviews: mine.length, applied: 0, p1: 0, p2: 0, p3: 0 }));
     for (const f of mine) {
       const answers = answerRows(readFileSync(join(root, f), 'utf8'));

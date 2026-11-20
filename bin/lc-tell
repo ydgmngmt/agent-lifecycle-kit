@@ -20,10 +20,18 @@ handoff=$(lc_get "$root" handoff_dir)
 dir=${handoff:-$root/.agents}
 mkdir -p "$dir"
 printf '%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$from" "$to" "$line" >>"$dir/tell.log"
-if ! timeout 10 tmux list-windows -t "$session" -F $'#{window_id}\t#W' 2>/dev/null | awk -F'\t' -v w="$to" '$2 == w { found = 1 } END { exit !found }'; then
-  echo "lc-tell: no window $to in tmux session $session; the line is only in $dir/tell.log" >&2
+# The window by its exact name, addressed by its id: a name with a dot would read as a pane.
+id=$(timeout 10 tmux list-windows -t "$session" -F $'#{window_id}\t#W' 2>/dev/null | awk -F'\t' -v w="$to" '$2 == w { print $1; exit }')
+[[ -n $id ]] || { echo "lc-tell: no window $to in tmux session $session; the line is only in $dir/tell.log" >&2; exit 1; }
+# One tell at a time per directory, and none over text someone left unsent in the input line (the
+# last line starting with ❯), which Enter would send with it.
+exec 9>>"$dir/tell.lock"
+flock -w 30 9 || { echo "lc-tell: another lc-tell held $dir/tell.lock for 30s; the line is only in $dir/tell.log" >&2; exit 1; }
+input=$(timeout 10 tmux capture-pane -p -t "$id" 2>/dev/null | awk '/^[[:space:]]*❯/ { l = $0 } END { sub(/^[[:space:]]*❯[[:space:]]*/, "", l); print l }')
+if [[ -n ${input//[[:space:]]/} ]]; then
+  echo "lc-tell: $to has unsent text in its input line ($input); the line is only in $dir/tell.log" >&2
   exit 1
 fi
 # Typed, then Enter a moment later, so the agent takes it as one message.
-timeout 10 tmux send-keys -t "$session:$to" -l "from $from: $line" && sleep 0.3 && timeout 10 tmux send-keys -t "$session:$to" Enter || { echo "lc-tell: tmux could not type into $session:$to" >&2; exit 1; }
+timeout 10 tmux send-keys -t "$id" -l "from $from: $line" && sleep 0.3 && timeout 10 tmux send-keys -t "$id" Enter || { echo "lc-tell: tmux could not type into $session:$to" >&2; exit 1; }
 echo "told $to"
