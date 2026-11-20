@@ -36,8 +36,9 @@
 // the GitHub workflow with -f candidate=<sha>, records the run whose title holds the candidate),
 // checks (no argument: the host's newest check run of each name in ci.required_checks on the exact
 // commit), session (writes a brief from templates/gate-brief.md and lc-spawns it: a full review first;
-// after a fail or a pass at an earlier candidate this one descends from, a follow-up review of the PR's
-// own change since, `git log -p --first-parent --remerge-diff`; none after two reviews after a fix
+// after a fail or a pass at an earlier candidate this one descends from, a follow-up review of the change
+// since: a PR's own change, `git log -p --first-parent --remerge-diff`, when its merges are all of main,
+// else `git diff`; none after two reviews after a fix
 // still fail; a PR's brief names the implementer's brief from the board's spawned.tsv), here (the
 // session running the gate does it and records), owner (asks on the board; the answer is the record,
 // or the lead's N/A in a scratch or dry run, which the phase record states and read-afterwards.jsonl
@@ -245,8 +246,12 @@ export function prCurrent(repo, head, { main = mainRef(repo), conf = null } = {}
     if (s > 1) die(`${a.slice(0, 12)} or ${b} is not in ${repo}; fetch first`);
     return s === 0;
   };
+  // A merge's hand-resolved files; null when git can't say (before 2.36), which holds nothing.
   const resolved = (c) => {
-    if (!remerge.has(c)) remerge.set(c, git(repo, 'show', '--remerge-diff', '--format=', '--name-only', c).split('\n').filter(Boolean));
+    if (!remerge.has(c)) {
+      const r = exec('git', ['-C', repo, 'show', '--remerge-diff', '--format=', '--name-only', c], { ok: true });
+      remerge.set(c, r.status ? null : r.stdout.split('\n').filter(Boolean));
+    }
     return remerge.get(c);
   };
   const ofMain = ({ parents }) => parents.length === 2 && isAncestor(parents[1], main);
@@ -264,16 +269,24 @@ export function prCurrent(repo, head, { main = mainRef(repo), conf = null } = {}
   };
   const ownFiles = (commits) => commits.flatMap((c) =>
     c.parents.length < 2 ? git(repo, 'diff-tree', '--no-commit-id', '--name-only', '-r', c.commit).split('\n').filter(Boolean)
-    : ofMain(c) ? resolved(c.commit)
-    : git(repo, 'diff', '--name-only', c.parents[0], c.commit).split('\n').filter(Boolean));
+    : (ofMain(c) && resolved(c.commit)) || git(repo, 'diff', '--name-only', c.parents[0], c.commit).split('\n').filter(Boolean));
   return (sha, step) => {
     if (sha === head) return true;
     if (step?.kind === 'checks') return false;
     const commits = between(sha);
     if (!commits) return false;
-    if (commits.every((c) => ofMain(c) && !resolved(c.commit).length)) return true;
+    if (commits.every((c) => ofMain(c) && resolved(c.commit)?.length === 0)) return true;
     return Boolean(conf && step?.kind === 'command' && step.if) && !matchesPaths(conf, step.if, ownFiles(commits));
   };
+}
+
+// Whether every merge on the first-parent line from..to merges a commit already on main: then the
+// PR's own change is `git log -p --first-parent --remerge-diff`; otherwise only `git diff` shows it all.
+export function mergesOfMainOnly(repo, from, to, main = mainRef(repo)) {
+  return git(repo, 'rev-list', '--first-parent', '--merges', '--parents', `${from}..${to}`).split('\n').filter(Boolean).every((l) => {
+    const [, , second, ...more] = l.split(' ');
+    return !more.length && exec('git', ['-C', repo, 'merge-base', '--is-ancestor', second, main], { ok: true }).status === 0;
+  });
 }
 
 // --- state -------------------------------------------------------------------------------------
@@ -748,9 +761,12 @@ const STEP = {
     const kept = join(ctx.dir, 'findings', `${s.id}.before-${ctx.sha.slice(0, 12)}.md`);
     if (existsSync(findings)) renameSync(findings, kept);
     let scope = 'a full review of the whole diff, as deep as the review skill asks.';
-    // A follow-up review reads only the PR's own change since: its commits and the hand-resolved lines
-    // of any merge, nothing main brought in (git 2.36 for --remerge-diff).
-    const own = (from) => `the PR's own change since is \`git log -p --first-parent --remerge-diff ${from}..${ctx.sha}\`: its commits and the hand-resolved lines of any merge, nothing main brought in`;
+    // A follow-up review reads only the change since. In a PR whose merges are all of main: its own
+    // commits and the hand-resolved lines of those merges, nothing main brought in (git 2.36 for
+    // --remerge-diff). Otherwise (the phase gate, a merge of another branch) the whole diff since.
+    const own = (from) => (ctx.gate === 'pr' && mergesOfMainOnly(ctx.repo, from, ctx.sha)
+      ? `the PR's own change since is \`git log -p --first-parent --remerge-diff ${from}..${ctx.sha}\`: its commits and the hand-resolved lines of any merge, nothing main brought in`
+      : `the change since is \`git diff ${from} ${ctx.sha}\``);
     if (earlier) {
       const was = earlier.evidence === findings ? kept : earlier.evidence;
       scope = `a review after a fix. The step failed at \`${earlier.sha.slice(0, 12)}\` with the findings in \`${was}\`; ${own(earlier.sha)}. Check that each of its P1 and P2 is resolved at the candidate and that those lines add none; raise nothing else, unless a P1 or P2 with its evidence.`;
@@ -1467,8 +1483,9 @@ async function merge(repo, [gate, branchArg]) {
   const branch = branchArg ?? git(repo, 'rev-parse', '--abbrev-ref', 'HEAD');
   const lock = join(gatesRoot(cfg), 'merge.lock');
   mkdirSync(dirname(lock), { recursive: true });
+  const mine = JSON.stringify({ holder: process.env.LC_SESSION || 'lead', branch, pid: process.pid, at: new Date().toISOString() }) + '\n';
   try {
-    writeFileSync(lock, JSON.stringify({ holder: process.env.LC_SESSION || 'lead', branch, pid: process.pid, at: new Date().toISOString() }) + '\n', { flag: 'wx' });
+    writeFileSync(lock, mine, { flag: 'wx' });
   } catch (err) {
     if (err.code !== 'EEXIST') throw err;
     let h = {};
@@ -1477,14 +1494,38 @@ async function merge(repo, [gate, branchArg]) {
     } catch {
       // an unreadable lock is still held
     }
-    die(`one merge at a time: ${lock} is held by ${h.holder ?? 'an unknown holder'} (merging ${h.branch ?? '?'} since ${h.at ?? '?'}, pid ${h.pid ?? '?'}); wait for it, or remove the file once that merge is gone`);
+    let gone = false;
+    try {
+      if (Number.isInteger(h.pid)) process.kill(h.pid, 0);
+    } catch (e) {
+      gone = e.code === 'ESRCH';
+    }
+    const held = `${h.holder ?? 'an unknown holder'} (merging ${h.branch ?? '?'} since ${h.at ?? '?'}, pid ${h.pid ?? '?'})`;
+    if (!gone) die(`one merge at a time: ${lock} is held by ${held}; wait for it, or remove the file once that merge is gone`);
+    // Its process is gone: take the lock over, and make sure no other taker won it meanwhile.
+    writeFileSync(`${lock}.${process.pid}.tmp`, mine);
+    renameSync(`${lock}.${process.pid}.tmp`, lock);
+    if (readJson(lock, {}).pid !== process.pid) die(`one merge at a time: another merge took over ${lock} just now`);
+    console.log(`took over ${lock} from ${held}: that process is gone`);
   }
+  // A signal skips `finally`: drop the lock on the way out.
+  const drop = () => readJson(lock, {}).pid === process.pid && rmSync(lock, { force: true });
+  const onSignal = (signal, code) => () => {
+    try {
+      drop();
+    } finally {
+      process.exit(code);
+    }
+  };
+  const handlers = [['SIGINT', onSignal('SIGINT', 130)], ['SIGTERM', onSignal('SIGTERM', 143)]];
+  for (const [s, fn] of handlers) process.once(s, fn);
   try {
     const said = announce(cfg, modeState);
     if (said) console.log(said);
     return await mergeLocked(repo, cfg, steps, modeState.mode, branch);
   } finally {
-    rmSync(lock, { force: true });
+    for (const [s, fn] of handlers) process.removeListener(s, fn);
+    drop();
   }
 }
 

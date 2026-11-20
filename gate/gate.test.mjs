@@ -1,7 +1,7 @@
 // The check's invariants. Run: node --test gate/*.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -515,6 +515,49 @@ test('lc-gate merge refuses while another merge holds the lock, naming its holde
   assert.equal(r.status, 1);
   assert.match(r.stderr, /one merge at a time: .*merge\.lock is held by lead-other \(merging other since 2026-01-01T00:00:00Z/);
   assert.equal(p.gh.log(), '');
+});
+
+// A git before 2.36 has no --remerge-diff: no record holds across a merge, so the hook refuses.
+test('when git cannot run --remerge-diff, a merge of main holds nothing and the merge hook refuses', () => {
+  const { repo, lc, git } = project('handoff_dir: $STATE\ngate_pr_mode: enforce\ngate_pr:\n  review: here look at it\n');
+  git('git checkout -q -b feat && echo a > a.txt && git add a.txt && git commit -qm work');
+  writeFileSync(join(repo, 'seen.md'), 'looked');
+  assert.equal(lc({}, 'record', 'pr', 'feat', 'review', 'pass', '--evidence', 'seen.md', '--candidate', 'HEAD').status, 0);
+  git('git checkout -q main && echo m > m.txt && git add m.txt && git commit -qm m && git checkout -q feat && git merge -q --no-edit main');
+  const gh = fakeGh();
+  gh.set('view.json', JSON.stringify({ headRefName: 'feat', headRefOid: git('git rev-parse HEAD') }));
+  const old = mkdtempSync(join(tmpdir(), 'lc-oldgit-'));
+  writeFileSync(join(old, 'git'), `#!/bin/sh\ncase "$*" in *--remerge-diff*) echo "fatal: unrecognized argument: --remerge-diff" >&2; exit 128 ;; esac\nexec ${git('command -v git')} "$@"\n`, { mode: 0o755 });
+  const gate = fileURLToPath(new URL('./gate.mjs', import.meta.url));
+  const hook = (path) => spawnSync('node', [gate, 'hook'], { cwd: repo, encoding: 'utf8', env: { ...process.env, LC_GATE_STEP: '', PATH: path }, input: JSON.stringify({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'gh pr merge feat' } }) });
+  const held = hook(`${gh.dir}:${process.env.PATH}`);
+  assert.equal(held.status, 0, held.stderr);
+  const refused = hook(`${old}:${gh.dir}:${process.env.PATH}`);
+  assert.equal(refused.status, 2, refused.stdout + refused.stderr);
+  assert.match(refused.stderr, /review: recorded for [0-9a-f]{12}, not the candidate/);
+});
+
+test("lc-gate merge takes over a lock whose holder is gone, and a signal removes its own lock", async () => {
+  const p = behind();
+  mkdirSync(join(p.repo, 'state/gates'), { recursive: true });
+  const lock = join(p.repo, 'state/gates/merge.lock');
+  const dead = spawnSync('true').pid;
+  writeFileSync(lock, JSON.stringify({ holder: 'lead-gone', branch: 'other', pid: dead, at: '2026-01-01T00:00:00Z' }));
+  const r = p.merge();
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, new RegExp(`took over .*merge\\.lock from lead-gone \\(merging other since 2026-01-01T00:00:00Z, pid ${dead}\\): that process is gone`));
+  assert.ok(!existsSync(lock));
+  // Killed while it waits for the checks: the lock goes with it.
+  const q = behind();
+  q.gh.set('runs.json', checkRun('verify-pr', 'in_progress', null, 1));
+  const qlock = join(q.repo, 'state/gates/merge.lock');
+  const child = spawn('node', [fileURLToPath(new URL('./gate.mjs', import.meta.url)), 'merge', 'pr', 'feat'], { cwd: q.repo, env: { ...process.env, ...q.gh.env, LC_GATE_STEP: '', LC_GATE_MERGE_WAIT: '120', LC_GATE_MERGE_POLL: '1' }, stdio: 'ignore' });
+  const exited = new Promise((done) => child.on('exit', (code) => done(code)));
+  for (let i = 0; i < 100 && !(existsSync(qlock) && /check-runs/.test(q.gh.log())); i++) await new Promise((ok) => setTimeout(ok, 100));
+  assert.ok(existsSync(qlock), 'the merge holds the lock while it waits');
+  child.kill('SIGTERM');
+  assert.equal(await exited, 143);
+  assert.ok(!existsSync(qlock));
 });
 
 // lc-pr: the PR body, one section at a time.

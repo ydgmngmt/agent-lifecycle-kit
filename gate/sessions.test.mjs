@@ -241,7 +241,7 @@ test('after a failed review, the next session checks the fix: the earlier findin
   assert.match(r.stdout, /started session/, r.stdout + r.stderr);
   const b = briefAt(f);
   assert.match(b, /Scope: a review after a fix/);
-  assert.match(b, new RegExp(`git log -p --first-parent --remerge-diff ${c1}\\.\\.${f.sh('git rev-parse HEAD')}`));
+  assert.match(b, new RegExp(`git diff ${c1} ${f.sh('git rev-parse HEAD')}`));
   assert.match(b, new RegExp(`findings/review\\.before-${f.sh('git rev-parse --short=12 HEAD')}\\.md`));
   // A candidate that does not descend from the failed one gets a full review.
   failAt(f, f.sh('git rev-parse HEAD'));
@@ -262,7 +262,7 @@ test('commits on top of a passed review get a review of the change since the pas
   f.lc('run', 'phase', 'x', '--candidate', 'HEAD', '--rerun', 'review');
   const b = briefAt(f);
   assert.match(b, /Scope: a review of the change since a pass/);
-  assert.match(b, new RegExp(`git log -p --first-parent --remerge-diff ${c1}\\.\\.${f.sh('git rev-parse HEAD')}`));
+  assert.match(b, new RegExp(`git diff ${c1} ${f.sh('git rev-parse HEAD')}`));
 });
 
 test('with a P1 or P2 still open after two reviews after a fix, run starts no further session: the lead decides', () => {
@@ -351,4 +351,33 @@ test('a hand-resolved merge of main is not held: the follow-up review reads exac
   const scope = scopeOf(f);
   assert.match(scope, /^\+RESOLVED$/m);
   assert.doesNotMatch(scope, /MAINLINE/);
+});
+
+test('a follow-up review keeps git diff as its scope in the phase gate and after a merge of a branch not on main', () => {
+  const f = fixture(SESSION);
+  f.pane('working\n');
+  f.sh('git checkout -q -b f1 && echo one > a.txt && git add a.txt && git commit -qm f1 && git checkout -q main && git merge -q --no-ff --no-edit f1');
+  const m1 = f.sh('git rev-parse HEAD');
+  const dir = join(f.repo, 'state/gates/phase/x');
+  mkdirSync(join(dir, 'records'), { recursive: true });
+  writeFileSync(join(dir, 'records/review.json'), JSON.stringify({ step: 'review', status: 'pass', sha: m1, evidence: join(dir, 'findings/review.md'), by: 'gate-x-review', at: 't', spawned: true }));
+  f.sh('git checkout -q -b f2 && echo BLINE > b.txt && git add b.txt && git commit -qm f2 && git checkout -q main && git merge -q --no-ff --no-edit f2');
+  const m2 = f.sh('git rev-parse HEAD');
+  f.lc('run', 'phase', 'x', '--base', m1, '--candidate', m2, '--rerun', 'review');
+  const phase = briefAt(f);
+  assert.match(phase, new RegExp(`the change since is \`git diff ${m1} ${m2}\``));
+  assert.doesNotMatch(phase, /remerge-diff/);
+  assert.match(f.sh(`git diff ${m1} ${m2}`), /\+BLINE/);
+  // A PR that merged a branch not on main.
+  const g = fixture(PRGATE);
+  g.pane('working\n');
+  g.sh('git checkout -q -b feat && echo a > a.txt && git add a.txt && git commit -qm pr');
+  const x = g.sh('git rev-parse HEAD');
+  recordAt(g, 'pass', x);
+  g.sh('git checkout -q -b side main && echo SLINE > s.txt && git add s.txt && git commit -qm side && git checkout -q feat && git merge -q --no-ff --no-edit side');
+  const h = g.sh('git rev-parse HEAD');
+  g.lc('run', 'pr', 'feat', '--rerun', 'reviewer');
+  const brief = readFileSync(join(g.repo, 'state/gates/pr/feat/briefs', `reviewer-${h.slice(0, 12)}.md`), 'utf8');
+  assert.match(brief, new RegExp(`git diff ${x} ${h}`));
+  assert.doesNotMatch(brief, /remerge-diff/);
 });

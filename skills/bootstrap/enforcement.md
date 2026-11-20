@@ -1,6 +1,6 @@
 # Enforcement stage
 
-Makes the gates binding. Five strengths, weakest last: the **host refuses** (required checks on a protected default branch, administrators included); a **local hook refuses** (earlier and cheaper); an **independent record** (the runner from a command's exit or a CI run, a separate session, the review pipeline, the owner); the **author's own word**, which is never a gate step. Three rules hold throughout: no session records a check of its own work; a change is judged by the base branch's copy of the checks and step lists; the files that define the rules change only in a PR the owner reads.
+Makes the gates binding. Five strengths, weakest last: the **host refuses** (required checks on a protected default branch, administrators included); a **local hook refuses** (earlier and cheaper); an **independent record** (the runner from a command's exit or a CI run, a separate session, the host's checks, the owner); the **author's own word**, which is never a gate step. Three rules hold throughout: no session records a check of its own work; a change is judged by the base branch's copy of the checks and step lists; the files that define the rules change only in a PR the owner reads.
 
 Resumable like the rest: each step's **Detect** says when it is done, so a rerun starts at the first open one. Each step tells the person, in one line, what it stops and what it costs, before asking. Never overwrite an existing file; chain or point to it.
 

@@ -88,7 +88,8 @@ pr:                                       # lc-pr: the PR body from the template
 # `if <key>` runs the step only when the change touches a glob under paths.<key>.
 # `after <step>` starts the step once each named step above holds with PASS or N/A: the checks that
 # cost no model tokens come before the review session.
-# Keep " #" and " — " out of a step line: the reader cuts a value there.
+# Keep " #" and " — " out of a step line: the reader cuts a value there. An argument may not end in
+# `plan`, `if <word>` or `after <word>` (read as the flags): quote it, e.g. bash -c 'terraform plan'.
 # Modes: off | observe (log and tell) | observe <n> | enforce (refuse). `observe <n>` observes until n
 # PRs have merged with every record, then enforces by itself; the hook says so once. A project that
 # wants refusals from the first PR writes enforce. lc-gate enforcement shows where the count stands.

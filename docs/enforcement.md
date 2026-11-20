@@ -23,12 +23,12 @@ The gate catches skipped steps and stale or failed results. It does not catch a 
 <id>: <kind> <argument> [if <paths key>] [plan] [after <step>[,<step>]]
 ```
 
-- **kind:** `command`, `workflow`, `checks` (no argument), `session`, `here` or `owner`.
+- **kind:** `command`, `workflow`, `checks` (no argument), `session`, `here` or `owner`. An argument may not end in `plan`, `if <word>` or `after <word>`: those are read as the flags; quote it (`bash -c 'terraform plan'`).
 - **`if <key>`:** the step applies only when the change touches the globs under `paths.<key>`. A step with no argument keeps it: `owner if protected`.
 - **`plan`** (on a `here` or `session` step, or a `command` step with `after`): the author records a plan before the branch's first commit, with `lc-gate record pr <branch> <step> plan --evidence <file>`; it is refused after that commit. `check` requires the plan beside the step's final record. A branch that already had commits when the gate saw it gets a plan N/A with a reason from the lead.
 - **`after <step>[,<step>]`** (last on the line): the step starts once each named step, declared above it, has a record that holds with PASS or N/A. Without it, a `session`, `workflow` or `checks` step starts at once and a `command`, `here` or `owner` step waits for a record on every step above. `after-gate` (before 1.8) is refused.
 
-A PR record **holds** for a later head when every commit between is a merge of main whose `git show --remerge-diff` prints nothing (no hand-resolved line). A `command` step with `if` also holds when the PR's own change between touches none of its paths. A `session` step whose record no longer holds gets a **follow-up review** of the PR's own change since: `git log -p --first-parent --remerge-diff <old>..<new>` (git 2.36).
+A PR record **holds** for a later head when every commit between is a merge of main whose `git show --remerge-diff` prints nothing (no hand-resolved line). A `command` step with `if` also holds when the PR's own change between touches none of its paths. A `session` step whose record no longer holds gets a **follow-up review** of the change since: in a PR whose merges are all of main, its own change, `git log -p --first-parent --remerge-diff <old>..<new>` (git 2.36; an older git holds no record across a merge); otherwise `git diff <old> <new>`.
 
 Example, from [the project template](../templates/project.yaml):
 
