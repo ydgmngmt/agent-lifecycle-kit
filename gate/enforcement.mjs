@@ -214,7 +214,7 @@ function rows(repo) {
   }
   for (const f of ruleFiles) {
     const on = listed?.some((g) => globRe(g).test(f));
-    add('owner reads', f, 'the owner, in a pull request of its own', 'nothing by itself: the base-copy checks name the change, and the owner reads it', on ? 'on' : 'off: not in protected_files', Boolean(listed));
+    add('owner reads', `gate rule file ${f}`, 'the owner, in a pull request of its own', 'nothing by itself: the base-copy checks name the change, and the owner reads it', on ? 'on' : 'off: not in protected_files', Boolean(listed));
   }
 
   // Whether anything refuses at all: the host, or a hook whose mode enforces. Observing modes only log.
@@ -246,6 +246,10 @@ export function enforcement(repo, _pos, flags) {
     const width = head.map((_, i) => Math.max(...all.map((r) => r[i].length)));
     for (const r of all) console.log(r.map((x, i) => (i < r.length - 1 ? x.padEnd(width[i]) : x)).join('  ').trimEnd());
   }
+  // Keys the 1.8 upgrade drops: said, never failed on.
+  const conf = loadConfig(repo).conf;
+  const dropped = ['gate.run', 'ci.pr_checks', 'merge.candidate'].filter((k) => k in conf);
+  if (dropped.length) console.log(`\nnote: ${dropped.join(', ')} ${dropped.length > 1 ? 'are' : 'is'} no longer read; drop ${dropped.length > 1 ? 'them' : 'it'} from .agents/project.yaml (docs/upgrading.md, 1.8)`);
   console.log(off.length ? `\n${off.length} configured layer(s) off:\n  ${off.map((r) => `${r.what}: ${r.state}`).join('\n  ')}` : '\nevery configured layer is on');
   return flags.strict && off.length ? 1 : 0;
 }

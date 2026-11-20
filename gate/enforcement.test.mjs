@@ -122,8 +122,8 @@ test('enforcement: each layer off is named, and --strict exits 1; without --stri
   assert.match(line(out.stdout, /Claude Code plugin hook/), /\boff\b/);
   assert.match(line(out.stdout, /workflow for verify-pr/), /\boff\b/);
   assert.match(line(out.stdout, /self-review/), /author's own word.*\boff\b/);
-  assert.match(line(out.stdout, /^owner reads\s+docs\/review\/tool-fit\.md/), /\boff\b.*protected_files/);
-  assert.match(line(out.stdout, /^owner reads\s+\.agents\/project\.yaml/), /\bon$/);
+  assert.match(line(out.stdout, /^owner reads\s+gate rule file docs\/review\/tool-fit\.md/), /\boff\b.*protected_files/);
+  assert.match(line(out.stdout, /^owner reads\s+gate rule file \.agents\/project\.yaml/), /\bon$/);
   assert.match(out.stdout, /configured layer\(s\) off/);
   assert.equal(r.lc(['enforcement']).status, 0);
 });
@@ -162,7 +162,7 @@ test('enforcement: the mechanical rules layer, once .agents/rules.yaml exists', 
   let out = r.lc(['enforcement', '--strict']);
   assert.equal(out.status, 1);
   assert.match(line(out.stdout, /^mechanical rules/), /lc-rules check --base.*\boff\b: neither a workflow nor a gate_pr command step runs lc-rules check --base/);
-  assert.match(line(out.stdout, /^owner reads\s+\.agents\/rules\.yaml/), /\boff\b.*protected_files/);
+  assert.match(line(out.stdout, /^owner reads\s+gate rule file \.agents\/rules\.yaml/), /\boff\b.*protected_files/);
   writeFileSync(join(r.repo, '.github/workflows/pr.yml'), `${readFileSync(join(r.repo, '.github/workflows/pr.yml'), 'utf8')}      - run: .lc-kit/bin/lc-rules selftest && .lc-kit/bin/lc-rules check --base "$B"\n`);
   out = r.lc(['enforcement']);
   assert.match(line(out.stdout, /^mechanical rules/), /\bon: \.github\/workflows\/pr\.yml/);
@@ -471,4 +471,19 @@ test('the phase check through from-base.sh uses the base step list', () => {
   assert.equal(out.status, 1);
   assert.match(out.stderr, /lint: missing/);
   assert.match(out.stdout, /PROTECTED GATE CHANGE/);
+});
+
+test('enforcement names keys the 1.8 upgrade drops, without failing on them', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'lc-enf-'));
+  sh(repo, 'git init -q -b main && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m one');
+  mkdirSync(join(repo, '.agents'));
+  const yaml = 'ci:\n  enforcement: none\ngate_pr:\n  build: command true\n';
+  writeFileSync(join(repo, '.agents/project.yaml'), yaml);
+  const run = () => spawnSync('node', [GATE, 'enforcement', '--strict'], { cwd: repo, encoding: 'utf8' });
+  const before = run();
+  assert.doesNotMatch(before.stdout, /no longer read/);
+  writeFileSync(join(repo, '.agents/project.yaml'), `${yaml}gate:\n  run: lc-gate run pr\nmerge:\n  candidate: head\n`);
+  const after = run();
+  assert.match(after.stdout, /note: gate\.run, merge\.candidate are no longer read; drop them from \.agents\/project\.yaml \(docs\/upgrading\.md, 1\.8\)/);
+  assert.equal(after.status, before.status);
 });

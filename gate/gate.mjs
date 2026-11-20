@@ -1,10 +1,14 @@
 // lc-gate: a gate's steps, declared in .agents/project.yaml, each leaving a record; `check` refuses
 // when a step has no valid record. Node 18+, no dependencies.
 //
-//   lc-gate run <phase|pr> [id] [--candidate <sha>] [--base <sha>] [--rerun <step>[,<step>]]
+//   lc-gate run <phase|pr> [id] [--candidate <sha>] [--base <sha>] [--rerun <step>[,<step>] [--lead --reason …]] [--wait]
 //                       idempotent walk, in file order: each step without a record that holds gets the
-//                       next thing for its kind; a session step stale on a new candidate waits for
-//                       --rerun or a carry
+//                       next thing for its kind. A session step whose FAIL, or PASS at an ancestor, no
+//                       longer holds gets its follow-up review by itself; one stale otherwise waits for
+//                       --rerun or a carry. --wait walks again every LC_GATE_WAIT_POLL seconds (30) until
+//                       a step's state changes or LC_GATE_WAIT seconds (1500) pass, then prints the walk.
+//                       A PR's base without --base: the PR's base branch on the host when it is not the
+//                       default branch (a stacked PR), else the default branch
 //   lc-gate record <gate> <id> <step> pass|fail|na --evidence <path|url> [--reason …] [--carry]
 //   lc-gate record <gate> <id> <step> plan --evidence <file> | plan na --reason …
 //                       a planned step's plan, at the base, refused once the work has a commit
@@ -27,6 +31,9 @@
 //   lc-gate protect [--yes]   branch protection on the default branch from ci.required_checks
 //                       (gate/enforcement.mjs)
 //   lc-gate questions <file>  a question file's questions, Q1, Q2, …: the rows a session's findings answer
+//   lc-gate tally <phase|pr> [--since <date>] [--md]
+//                       per question of each session step: how often it applied, its P1, P2 and P3 rows,
+//                       over every findings file under the gates root
 //
 // gate_pr_mode and gate_pr_plan are off, observe, enforce, or `observe <n>`: enforce once <n> PRs have
 // merged with every record. The hook and lc-gate merge mark each merge they let through:
@@ -38,8 +45,9 @@
 // commit), session (writes a brief from templates/gate-brief.md and lc-spawns it: a full review first;
 // after a fail or a pass at an earlier candidate this one descends from, a follow-up review of the change
 // since: a PR's own change, `git log -p --first-parent --remerge-diff`, when its merges are all of main,
-// else `git diff`; none after two reviews after a fix
-// still fail; a PR's brief names the implementer's brief from the board's spawned.tsv), here (the
+// else `git diff`; none once sessions.gate_rounds (2) follow-up reviews of the gate ended in FAIL, unless
+// the lead starts one with --rerun <step> --lead --reason; a session gone with no record is started
+// again once; a PR's brief names the implementer's brief from the board's spawned.tsv), here (the
 // session running the gate does it and records), owner (asks on the board; the answer is the record,
 // or the lead's N/A in a scratch or dry run, which the phase record states and read-afterwards.jsonl
 // in the board's data dir lists).
@@ -67,7 +75,8 @@
 // in a row (questions, answerProblems), and never N/A or a carry. Any other
 // caller is the lead (`by` is LC_SESSION, else "lead"). Nobody records a command step's pass (the runner
 // does, from its exit), and only the spawned session records a session step's pass (the lead: N/A, carry).
-// A session step runs on sessions.gate_model and sessions.gate_effort (opus, xhigh), never the lead's;
+// A session step runs on sessions.gate_model and sessions.gate_effort (opus, xhigh), never the lead's,
+// and with sessions.gate_flags (else sessions.agent_flags; {kit} is this kit's directory);
 // with sessions.gate_parallel <n>, run starts a session step only while fewer than <n> are running;
 // with sessions.gate_setup, its sessions read in one worktree at the candidate, set up by it (gateWorktree).
 import { spawn, spawnSync } from 'node:child_process';
@@ -399,6 +408,7 @@ function record(repo, [gate, id, step, status, planStatus], flags) {
   const rec = { step, status, sha, evidence, by: process.env.LC_SESSION || 'lead', at: new Date().toISOString(), reason };
   if (flags.carry) rec.carried = { from: old.sha, at: old.at };
   if (own) rec.spawned = true;
+  keepHistory(s, old, rec);
   if (!g.state.candidate) writeJson(join(g.dir, 'gate.json'), { gate, id, candidate: sha });
   writeJson(join(g.dir, 'records', `${step}.json`), rec);
   console.log(`recorded ${gate} ${id} ${step}: ${status}${rec.carried ? ' (carried)' : ''} for ${sha.slice(0, 12)}`);
@@ -460,6 +470,32 @@ function recordPlan(g, gate, id, s, status, flags) {
   console.log(`recorded ${gate} ${id} ${s.id} plan: ${label(rec)} at the base ${base.slice(0, 12)}`);
 }
 
+// A session step's record keeps the ones it replaces (and the lead's extra rounds) in `history`.
+function keepHistory(s, old, rec) {
+  if (s.kind !== 'session' || !old) return;
+  const { history = [], ...was } = old;
+  rec.history = [...history, was].slice(-30);
+}
+
+// A session step's reviews, from rounds.json ({ sha, followUp, at, lead? } per started session), each
+// with the status its session ended in: the first record at its commit made after it started.
+export function reviewRounds(list, rec) {
+  const outcomes = rec ? [...(rec.history ?? []), rec].filter((o) => o.status && !o.lead) : [];
+  return (Array.isArray(list) ? list : []).map((e) => {
+    if (e.status) return e;
+    const o = outcomes.find((x) => x.sha === e.sha && !(Date.parse(x.at) < Date.parse(e.at)));
+    return o ? { ...e, status: o.status } : e;
+  });
+}
+const failedFollowUps = (reviews) => reviews.filter((e) => e.followUp && e.status === 'fail').length;
+// sessions.gate_rounds: how many follow-up reviews of a step may end in FAIL before the lead decides.
+function roundsLimit(conf) {
+  const v = conf['sessions.gate_rounds'];
+  const n = v ? Number(v) : 2;
+  if (!(Number.isInteger(n) && n > 0)) die(`sessions.gate_rounds is "${v}": a whole number above 0, or unset (2)`);
+  return n;
+}
+
 const label = (r) =>(r ? `${r.status === 'na' ? 'N/A' : r.status.toUpperCase()}${r.carried ? ' carried' : ''}` : '-');
 
 function status(repo, [gate, id], flags) {
@@ -487,6 +523,12 @@ function status(repo, [gate, id], flags) {
   const width = rows[0].map((_, i) => Math.max(...rows.map((r) => r[i].length)));
   console.log(`${gate} ${id}, candidate ${sha}`);
   for (const r of rows) console.log(r.map((c, i) => (i < r.length - 1 ? c.padEnd(width[i]) : c)).join('  ').trimEnd());
+  const sessions = g.steps.filter((s) => s.kind === 'session');
+  if (sessions.length) {
+    const rounds = readJson(join(g.dir, 'rounds.json'), {});
+    const limit = roundsLimit(g.cfg.conf);
+    console.log(`\nfollow-up reviews ended in FAIL (sessions.gate_rounds ${limit}): ${sessions.map((s) => `${s.id} ${failedFollowUps(reviewRounds(rounds[s.id], g.records[s.id]))}`).join(', ')}`);
+  }
   console.log(problems.length ? `\n${problems.length} step(s) not done:\n  ${problems.join('\n  ')}` : '\nevery step holds');
 }
 
@@ -515,11 +557,99 @@ const matchesPaths = (conf, key, files) => {
   return files.some((f) => globs.some((re) => re.test(f)));
 };
 
-async function run(repo, [gate, idArg], flags) {
+// `run`: one walk; with --wait, walks again until a step's state changes or LC_GATE_WAIT seconds pass,
+// printing the first walk and the last. It holds no lock: a walk is idempotent.
+async function run(repo, args, flags) {
+  if (flags.lead) {
+    if (process.env.LC_GATE_STEP) die('a spawned session may not start a review round; only the lead may');
+    if (!flags.rerun || !flags.reason?.trim()) die('--lead starts one more review session past sessions.gate_rounds: --rerun <step> --lead --reason "…"');
+  }
+  let w = await walk(repo, args, flags);
+  if (!flags.wait || w.done) return w.code;
+  if (!w.inflight) {
+    console.log('--wait: nothing runs that could change a step (no session, check, workflow or owner answer pending); the next move is yours');
+    return w.code;
+  }
+  const limit = Number(process.env.LC_GATE_WAIT || 1500);
+  const poll = Number(process.env.LC_GATE_WAIT_POLL || 30);
+  const started = Date.now();
+  const again = { ...flags, rerun: undefined, lead: false };
+  let lines = [];
+  while (Date.now() - started < limit * 1000) {
+    await sleep(Math.min(poll * 1000, started + limit * 1000 - Date.now()));
+    lines = [];
+    const next = await captured(lines, () => walk(repo, args, again));
+    const changed = Object.keys(next.state).filter((k) => next.state[k] !== w.state[k]);
+    w = next;
+    if (changed.length || !next.inflight) {
+      console.log(`--wait: after ${Math.round((Date.now() - started) / 1000)}s, ${changed.length ? `changed: ${changed.join(', ')}` : 'nothing runs any more'}`);
+      for (const l of lines) console.log(l);
+      return next.code;
+    }
+  }
+  console.log(`--wait: nothing changed in ${limit}s (LC_GATE_WAIT); the last walk:`);
+  for (const l of lines) console.log(l);
+  return w.code;
+}
+
+// console.log into `lines` while fn runs.
+async function captured(lines, fn) {
+  const log = console.log;
+  console.log = (...a) => lines.push(a.join(' '));
+  try {
+    return await fn();
+  } finally {
+    console.log = log;
+  }
+}
+
+const isAncestor = (repo, a, b) => exec('git', ['-C', repo, 'merge-base', '--is-ancestor', a, b], { ok: true }).status === 0;
+
+// The PR gate's other gates: [id, tip], the tip being the local branch, else the gate's candidate.
+function otherGates(cfg, id) {
+  const root = join(gatesRoot(cfg), 'pr');
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { recursive: true }).map(String).filter((f) => basename(f) === 'gate.json').flatMap((f) => {
+    const st = readJson(join(root, f), {});
+    if (!st.id || st.id === id) return [];
+    const local = exec('git', ['-C', cfg.repo, 'rev-parse', '--verify', '-q', `refs/heads/${st.id}^{commit}`], { ok: true });
+    const tip = local.status === 0 ? local.stdout.trim() : st.candidate;
+    return tip ? [[st.id, tip]] : [];
+  });
+}
+
+// A PR gate's base without --base: the merge-base with the PR's base branch on the host when that is not
+// the default branch (a stacked PR); else with the default branch. With no PR on the host, it also names
+// another gated branch whose commits the diff to the default branch holds. { base, note }.
+function prBase(repo, cfg, id, sha) {
+  const main = mainRef(repo);
+  let name = null;
+  if (exec('git', ['-C', repo, 'remote', 'get-url', 'origin'], { ok: true, timeout: FAST }).status === 0) {
+    try {
+      const r = exec('gh', ['pr', 'view', id, '--json', 'baseRefName'], { cwd: repo, timeout: GH_TIMEOUT, ok: true });
+      if (r.status === 0) name = JSON.parse(r.stdout).baseRefName || null;
+    } catch {
+      // no gh, or an answer that is not JSON: as with no PR
+    }
+  }
+  if (name && !isMainBranch(repo, name)) {
+    const ref = [`refs/remotes/origin/${name}`, `refs/heads/${name}`].find((x) => exec('git', ['-C', repo, 'rev-parse', '--verify', '-q', `${x}^{commit}`], { ok: true }).status === 0);
+    if (ref) return { base: git(repo, 'merge-base', ref, sha), note: `base: the merge-base with ${name}, the PR's base branch on the host` };
+    return { base: git(repo, 'merge-base', main, sha), note: `the PR's base branch ${name} is not here (git fetch origin ${name}); base: the default branch` };
+  }
+  const base = git(repo, 'merge-base', main, sha);
+  if (name) return { base, note: '' };
+  const stacked = otherGates(cfg, id).filter(([, tip]) => isAncestor(repo, tip, sha) && !isAncestor(repo, tip, base)).map(([o]) => o);
+  return { base, note: stacked.length ? `no PR on the host says this branch's base, and its diff to the default branch holds commits of ${stacked.join(', ')}, a branch with a gate: pass --base ${stacked[0]}, or open the PR with --base ${stacked[0]}` : '' };
+}
+
+// One walk of the gate. { code, done: every step holds, inflight: something runs that can change a step
+// by itself, state: per step, what --wait compares }.
+async function walk(repo, [gate, idArg], flags) {
   const id = idArg ?? (gate === 'pr' ? branchId(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')) : undefined);
   const g = load(repo, gate, id);
   const sha = flags.candidate ? verify(repo, flags.candidate) : gate === 'phase' && g.state.candidate ? g.state.candidate : verify(repo, 'HEAD');
-  const base = flags.base ? verify(repo, flags.base) : gate === 'pr' ? git(repo, 'merge-base', mainRef(repo), sha) : g.state.base;
+  const { base, note } = flags.base ? { base: verify(repo, flags.base) } : gate === 'pr' ? prBase(repo, g.cfg, id, sha) : { base: g.state.base };
   if (!base) die(`the phase gate's first run needs --base <main before the phase's first merge>`);
   const current = currentFor(g, gate, sha);
   if (g.state.candidate && g.state.candidate !== sha) {
@@ -534,18 +664,25 @@ async function run(repo, [gate, idArg], flags) {
   mkdirSync(evidence, { recursive: true });
   writeFileSync(join(evidence, 'prs.txt'), exec('git', ['-C', repo, 'log', '--first-parent', '--merges', '--format=%h %s', `${base}..${sha}`]).stdout);
   writeFileSync(join(evidence, 'files.txt'), exec('git', ['-C', repo, 'diff', '--name-only', base, sha]).stdout);
-  const ctx = { ...g, repo, gate, id, sha, base };
+  const ctx = { ...g, repo, gate, id, sha, base, notes: {}, inflight: false };
   let diff;
+  let baseConf;
+  // `if <key>` reads the union of the head's and the base's paths.<key>, so a change that drops its own
+  // files from the paths still gets the step.
   const touches = (key) => {
     diff ??= git(repo, 'diff', '--name-only', base, sha).split('\n').filter(Boolean);
-    return matchesPaths(g.cfg.conf, key, diff);
+    baseConf ??= ((r) => (r.status ? {} : parseProject(r.stdout)))(exec('git', ['-C', repo, 'show', `${base}:.agents/project.yaml`], { ok: true }));
+    return matchesPaths(g.cfg.conf, key, diff) || (Boolean(baseConf[`paths.${key}`]) && matchesPaths(baseConf, key, diff));
   };
   ctx.width = Math.max(...g.steps.map((s) => s.id.length));
-  console.log(`${gate} ${id}: candidate ${sha.slice(0, 12)}, base ${base.slice(0, 12)}`);
-  // --rerun <step>[,<step>]: ignore the step's record and do it again (the only way a stale session
-  // step is started again on a new candidate; otherwise the lead carries it).
+  console.log(`${gate} ${id}: candidate ${sha.slice(0, 12)}, base ${base.slice(0, 12)}${note ? `; ${note}` : ''}`);
+  // --rerun <step>[,<step>]: ignore the step's record and do it again (a stale session step whose record
+  // is not a FAIL or a PASS at an ancestor starts again only so; otherwise the lead carries it).
   const rerun = new Set((flags.rerun ?? '').split(',').filter(Boolean));
   for (const x of rerun) if (!g.steps.some((s) => s.id === x)) die(`--rerun ${x}: no such step`);
+  ctx.rerun = rerun;
+  ctx.lead = flags.lead ? { reason: flags.reason.trim() } : null;
+  ctx.rounds = roundsLimit(g.cfg.conf);
   let above = true; // every step above has a record for the candidate
   let commits;
   // sessions.gate_parallel: at most that many gate sessions at a time (unset: no limit). A live session
@@ -567,13 +704,19 @@ async function run(repo, [gate, idArg], flags) {
     // `after`: each named step's record holds with PASS or N/A; else today's rule, every step above recorded.
     const pending = s.after?.filter((x) => !['pass', 'na'].includes(held[x]?.status)) ?? [];
     const waits = s.after ? pending.length > 0 : ['command', 'here', 'owner'].includes(s.kind) && !above;
-    if (rerun.has(s.id) && s.kind === 'session') rmSync(join(g.dir, 'briefs', `${s.id}-${sha.slice(0, 12)}.md`), { force: true });
+    // A follow-up review starts by itself: the step's FAIL, or its PASS at an ancestor, no longer holds.
+    const followUp = s.kind === 'session' && !r && old && (old.status === 'fail' || (old.status === 'pass' && old.sha !== sha && isAncestor(repo, old.sha, sha)));
+    if (rerun.has(s.id) && s.kind === 'session') {
+      const brief = join(g.dir, 'briefs', `${s.id}-${sha.slice(0, 12)}.md`);
+      rmSync(brief, { force: true });
+      rmSync(`${brief}.restarted`, { force: true });
+    }
     if (r && s.kind === 'session' && liveWindow(g.cfg, sessionName(ctx, s))) {
       closeWindow(g.cfg, sessionName(ctx, s));
       say(ctx, s, `${label(r)}, by ${r.by}; closed its window ${sessionName(ctx, s)}`);
     } else if (r && !(['command', 'checks'].includes(s.kind) && r.status === 'fail' && !waits)) say(ctx, s, `${label(r)}, by ${r.by}${r.reason ? ` (${r.reason})` : ''}`);
     else if (!r && s.if && !touches(s.if)) r = put(ctx, s, 'na', '', `no file changed between ${base.slice(0, 12)} and ${sha.slice(0, 12)} matches paths.${s.if}`, 'lc-gate');
-    else if (s.kind === 'session' && old && !rerun.has(s.id) && !waits) {
+    else if (s.kind === 'session' && old && !rerun.has(s.id) && !waits && !followUp) {
       say(ctx, s, `stale: ${label(old)} for ${old.sha.slice(0, 12)}. Rerun it with lc-gate run ${gate} ${id} --rerun ${s.id}, or carry it with lc-gate record ${gate} ${id} ${s.id} pass --carry --reason …`);
     }
     else if (waits) say(ctx, s, s.after ? `${r ? `${label(r)}; reruns once` : 'waits until'} ${pending.join(', ')} ${pending.length > 1 ? 'pass or are' : 'passes or is'} N/A` : r ? `${label(r)}; reruns once the steps above have records` : 'waits until every step above has a record');
@@ -588,12 +731,23 @@ async function run(repo, [gate, idArg], flags) {
     if (r) held[s.id] = r;
     above &&= Boolean(r);
   }
-  const problems = check(g.steps, readRecords(g.dir), sha, current);
+  const records = readRecords(g.dir);
+  const problems = check(g.steps, records, sha, current);
   console.log(
     !problems.length ? `every step holds: ${gate === 'phase' ? `lc-gate status phase ${id} --write` : `lc-gate merge pr ${id}`}`
-    : `${problems.length} step(s) not done; rerun lc-gate run to advance`,
+    : `${problems.length} step(s) not done; rerun lc-gate run${ctx.inflight ? ', or wait with --wait' : ''}`,
   );
-  return 0;
+  // What --wait compares: each step's record, a session's window and restart mark, and what a checks,
+  // workflow or owner step said.
+  const state = { candidate: sha };
+  for (const s of g.steps) {
+    const x = records[s.id];
+    const brief = join(g.dir, 'briefs', `${s.id}-${sha.slice(0, 12)}.md`);
+    state[s.id] = [x ? `${x.status}@${x.sha}@${x.at}` : '-',
+      s.kind === 'session' ? `${liveWindow(g.cfg, sessionName(ctx, s)) ? 'live' : 'none'} ${existsSync(brief) ? 'brief' : ''} ${existsSync(`${brief}.restarted`) ? 'restarted' : ''}` : '',
+      ['checks', 'workflow', 'owner'].includes(s.kind) ? ctx.notes[s.id] ?? '' : ''].join(' ');
+  }
+  return { code: 0, done: !problems.length, inflight: ctx.inflight, state };
 }
 
 // The brief lc-spawn last started a session on in the PR branch's worktree (the board's spawned.tsv:
@@ -645,6 +799,7 @@ function idleNote(ctx, s, window) {
 }
 
 function say(ctx, s, text) {
+  if (ctx.notes) ctx.notes[s.id] = text;
   console.log(`  ${s.id.padEnd(ctx.width)}  ${s.kind.padEnd(8)}  ${text}`);
   return null;
 }
@@ -652,6 +807,7 @@ function say(ctx, s, text) {
 // A record the runner writes itself (a command's exit, a workflow run, an owner's answer, an `if` N/A).
 function put(ctx, s, status, evidence, reason, by) {
   const rec = { step: s.id, status, sha: ctx.sha, evidence, by, at: new Date().toISOString(), reason };
+  keepHistory(s, ctx.records[s.id], rec);
   writeJson(join(ctx.dir, 'records', `${s.id}.json`), rec);
   say(ctx, s, `${label(rec)}${reason ? ` (${reason})` : ''}`);
   return rec;
@@ -723,6 +879,7 @@ const STEP = {
     const out = exec('gh', ['run', 'list', '--workflow', s.arg, '--limit', '50', '--json', 'displayTitle,status,conclusion,url'], { cwd: ctx.repo, timeout: GH_TIMEOUT });
     const found = JSON.parse(out.stdout).find((x) => x.displayTitle.includes(ctx.sha));
     const marker = join(ctx.dir, 'evidence', `${s.id}.dispatched`);
+    if (!found || found.status !== 'completed') ctx.inflight = true;
     if (!found) {
       if (existsSync(marker) && readFileSync(marker, 'utf8').trim() === ctx.sha) return say(ctx, s, `dispatched; no run titled with ${ctx.sha.slice(0, 12)} yet (does its run-name hold inputs.candidate?)`);
       exec('gh', ['workflow', 'run', s.arg, '-f', `candidate=${ctx.sha}`], { cwd: ctx.repo, timeout: GH_TIMEOUT });
@@ -741,25 +898,35 @@ const STEP = {
     const window = liveWindow(ctx.cfg, name);
     if (window) {
       const idle = idleNote(ctx, s, window);
+      ctx.inflight = true;
       return say(ctx, s, `session ${name} is running; waiting for its record (lc-close ${name} to stop it)${idle && `\n    ${name} ${idle}`}`);
     }
-    // A review after a fix: the step failed at an earlier candidate this one descends from. After two
-    // such reviews with a P1 or P2 still open, no further session: the lead decides.
+    // A session started for this candidate that is gone (no window, no record) is started again once.
+    const gone = existsSync(brief);
+    if (gone && existsSync(`${brief}.restarted`)) return say(ctx, s, `session ${name} ended without a record, also after one start again; start it again with --rerun ${s.id}`);
+    // A follow-up review: the step failed, or passed, at an earlier candidate this one descends from.
     const old = ctx.records[s.id];
     const before = (old?.status === 'fail' || old?.status === 'pass') && old.sha !== ctx.sha && exec('git', ['-C', ctx.repo, 'merge-base', '--is-ancestor', old.sha, ctx.sha], { ok: true }).status === 0 ? old : null;
     const earlier = before?.status === 'fail' ? before : null;
+    // sessions.gate_rounds follow-up reviews of this step ended in FAIL, whatever the commit: no further
+    // session, unless the lead starts one (--rerun <step> --lead --reason), which the record's history keeps.
     const roundsFile = join(ctx.dir, 'rounds.json');
     const rounds = readJson(roundsFile, {});
-    const round = earlier ? (rounds[s.id]?.[earlier.sha] ?? 0) + 1 : 0;
-    if (round > 2) return say(ctx, s, `a P1 or P2 is still open after two reviews after a fix (${earlier.evidence}): no further session; the lead decides (lc-gate record ${ctx.gate} ${ctx.id} ${s.id} na --reason …, or a decision on the board)`);
-    if (existsSync(brief)) return say(ctx, s, `session ${name} ended without a record; start it again with --rerun ${s.id}`);
-    if (ctx.parallel && ctx.running >= ctx.parallel) return say(ctx, s, `waits: ${ctx.running} session(s) running, sessions.gate_parallel is ${ctx.parallel}`);
+    const reviews = reviewRounds(rounds[s.id], old);
+    const lead = ctx.lead && ctx.rerun.has(s.id) ? ctx.lead : null;
+    const failed = failedFollowUps(reviews);
+    if (!gone && failed >= ctx.rounds && !lead) return say(ctx, s, `${failed} follow-up review(s) ended in FAIL (sessions.gate_rounds ${ctx.rounds}): no further session. The one way on: lc-gate run ${ctx.gate} ${ctx.id} --rerun ${s.id} --lead --reason "…"`);
+    if (ctx.parallel && ctx.running >= ctx.parallel) {
+      ctx.inflight = true;
+      return say(ctx, s, `waits: ${ctx.running} session(s) running, sessions.gate_parallel is ${ctx.parallel}`);
+    }
     const findings = join(ctx.dir, 'findings', `${s.id}.md`);
     mkdirSync(dirname(findings), { recursive: true });
     mkdirSync(dirname(brief), { recursive: true });
-    // Findings of an earlier candidate are kept beside, so the new session starts from an empty file.
+    // Findings of an earlier candidate are kept beside, so the new session starts from an empty file; a
+    // gone session's are kept apart, so the earlier ones the brief names stay.
     const kept = join(ctx.dir, 'findings', `${s.id}.before-${ctx.sha.slice(0, 12)}.md`);
-    if (existsSync(findings)) renameSync(findings, kept);
+    if (existsSync(findings)) renameSync(findings, gone ? join(ctx.dir, 'findings', `${s.id}.gone-${ctx.sha.slice(0, 12)}.md`) : kept);
     let scope = 'a full review of the whole diff, as deep as the review skill asks.';
     // A follow-up review reads only the change since. In a PR whose merges are all of main: its own
     // commits and the hand-resolved lines of those merges, nothing main brought in (git 2.36 for
@@ -773,34 +940,48 @@ const STEP = {
     }
     // Commits on top of a pass: only they are reviewed.
     if (before?.status === 'pass') scope = `a review of the change since a pass. The step passed at \`${before.sha.slice(0, 12)}\`; ${own(before.sha)}. Review those lines as deep as the review skill asks; raise nothing in the rest, unless a P1 or P2 with its evidence.`;
-    writeJson(roundsFile, { ...rounds, [s.id]: { ...rounds[s.id], [ctx.sha]: round } });
+    const at = new Date().toISOString();
+    const entry = { sha: ctx.sha, followUp: Boolean(before), at, ...(lead ? { lead: lead.reason } : {}) };
+    writeJson(roundsFile, { ...rounds, [s.id]: gone ? reviews : [...reviews, entry] });
+    if (gone) writeFileSync(`${brief}.restarted`, `${at}\n`);
+    // The lead's extra round goes into the step's record history, with its reason.
+    if (lead && old) {
+      const file = join(ctx.dir, 'records', `${s.id}.json`);
+      writeJson(file, { ...old, history: [...(old.history ?? []), { lead: true, sha: ctx.sha, reason: lead.reason, by: process.env.LC_SESSION || 'lead', at }].slice(-30) });
+    }
     const spec = ctx.gate !== 'pr' ? 'The spec: the inputs the question file names.'
       : ((b) => (b ? `The PR's brief: \`${b}\`; judge the change against it.` : "The PR's brief: none known; judge the change against the PR body."))(prBrief(ctx));
     const setup = ctx.cfg.conf['sessions.gate_setup'];
     const checkout = setup ? `read in the gate's worktree \`${gateWorktree(ctx, setup)}\`, set up by \`${setup}\`: run checks there, edit nothing` : 'read in your own detached worktree';
     const values = { gate: ctx.gate, id: ctx.id, step: s.id, session: name, question: s.arg, base: ctx.base, candidate: ctx.sha, checkout, evidence: join(ctx.dir, 'evidence'), findings, scope, spec };
     writeFileSync(brief, readFileSync(join(KIT, 'templates/gate-brief.md'), 'utf8').replace(/\{\{(\w+)\}\}/g, (_, k) => values[k]));
-    // The model floor: a gate session runs on the gate's model and effort, never on the lead's.
+    // The model floor: a gate session runs on the gate's model and effort, never on the lead's; with
+    // sessions.gate_flags, on those agent flags in place of sessions.agent_flags (a lean start).
     const conf = ctx.cfg.conf;
     const env = { ...process.env, LC_GATE_STEP: `${ctx.gate}/${ctx.id}/${s.id}`, LC_MODEL: conf['sessions.gate_model'] || 'opus', LC_EFFORT: conf['sessions.gate_effort'] || 'xhigh' };
+    if (conf['sessions.gate_flags']) env.LC_AGENT_FLAGS = conf['sessions.gate_flags'].replaceAll('{kit}', KIT.replace(/\/$/, ''));
     let out;
     try {
       out = exec(join(KIT, 'bin/lc-spawn'), [name, ctx.repo, brief], { cwd: ctx.repo, timeout: 60_000, env }).stdout;
     } catch (err) {
       unlinkSync(brief); // the brief marks a started session; the next run tries again
+      rmSync(`${brief}.restarted`, { force: true });
       throw err;
     }
     ctx.running++;
+    ctx.inflight = true;
     // The window as it is now, so the next run sees whether anything changed.
     const started = liveWindow(ctx.cfg, name);
     if (started) idleNote(ctx, s, started);
     const said = out.split('\n').filter((l) => l.startsWith('lc-spawn:')).map((l) => `\n    ${l}`).join('');
-    return say(ctx, s, `started session ${name} on ${env.LC_MODEL}, effort ${env.LC_EFFORT}; brief ${brief}${said}`);
+    const why = gone ? ` again: it was gone with no window and no record (once)` : lead ? ` past sessions.gate_rounds, by the lead: ${lead.reason}` : '';
+    return say(ctx, s, `started session ${name}${why} on ${env.LC_MODEL}, effort ${env.LC_EFFORT}; brief ${brief}${said}`);
   },
 
   // The host's verdict on this exact commit; a check still running or not started yet is waited for.
   checks(ctx, s) {
     const r = hostChecks(ctx.cfg, ctx.sha);
+    if (r.wait) ctx.inflight = true;
     return r.wait ? say(ctx, s, r.wait) : put(ctx, s, r.status, r.evidence, r.reason, 'lc-gate');
   },
 
@@ -816,10 +997,12 @@ const STEP = {
       mkdirSync(data, { recursive: true });
       const body = s.arg || `Every step before this one holds at ${ctx.sha}.`;
       exec(join(KIT, 'bin/lc-board'), ['ask', qid, '--title', `${ctx.gate} ${ctx.id}: ${s.id} at ${ctx.sha.slice(0, 12)}`, '--body', body, '--option', 'Accept|The candidate is accepted', '--option', 'Not yet|Say in the note what is missing'], { cwd: ctx.repo, timeout: 30_000 });
+      ctx.inflight = true;
       return say(ctx, s, `asked the owner on the board (${qid})`);
     }
     const answers = existsSync(join(data, 'answers.jsonl')) ? readFileSync(join(data, 'answers.jsonl'), 'utf8').split('\n').filter(Boolean) : [];
     const answer = answers.map((l) => { try { return JSON.parse(l); } catch { return {}; } }).filter((a) => a.id === qid).at(-1);
+    if (!answer) ctx.inflight = true;
     if (!answer) return say(ctx, s, `waiting for the owner's answer to ${qid} on the board`);
     const accepted = answer.choice === 0;
     return put(ctx, s, accepted ? 'pass' : 'fail', `board answer ${qid}`, answer.text?.trim() || (accepted ? '' : 'not accepted'), 'owner');
@@ -845,7 +1028,9 @@ export function hostChecks(cfg, sha) {
   const missing = names.filter((n) => !newest.has(n));
   const running = names.filter((n) => newest.has(n) && newest.get(n).status !== 'completed');
   if (missing.length || running.length) {
-    const none = !runs.length ? `: no check run on ${short} at all; is the head pushed?` : '';
+    // Right after a push the host may not list the runs yet: a commit a remote branch holds is pushed.
+    const pushed = () => exec('git', ['-C', cfg.repo, 'branch', '-r', '--contains', sha], { ok: true, timeout: FAST }).stdout.trim() !== '';
+    const none = runs.length ? '' : pushed() ? `: no check run on ${short} yet; the host has not listed its runs` : `: no check run on ${short} at all; is the head pushed?`;
     return { wait: `waits for the checks on ${short}: ${[running.length && `running: ${running.join(', ')}`, missing.length && `not started: ${missing.join(', ')}`].filter(Boolean).join('; ')}${none}` };
   }
   return { status: 'pass', evidence: checksUrl(cfg, sha, runs), reason: '' };
@@ -1587,6 +1772,58 @@ async function mergeLocked(repo, cfg, steps, mode, branch) {
   return 0;
 }
 
+// `lc-gate tally <phase|pr> [--since <date>] [--md]`: what each question of the gate's session steps
+// caught, over every findings file under the gates root (the current ones and those kept beside them):
+// per question, the reviews, how often it applied, and its P1, P2 and P3 rows, read from the verdict
+// column as `record` reads it (an older must-fix is P2, comment P3). A row is matched by its Q number.
+export function tally(repo, [gate], flags) {
+  if (gate !== 'phase' && gate !== 'pr') die('usage: lc-gate tally <phase|pr> [--since <date>] [--md]');
+  const cfg = loadConfig(repo);
+  const steps = parseSteps(cfg.conf, gate).filter((s) => s.kind === 'session');
+  if (!steps.length) die(`gate_${gate} has no session step`);
+  const since = flags.since ? Date.parse(flags.since) : 0;
+  if (Number.isNaN(since)) die(`--since ${flags.since}: not a date`);
+  const root = join(gatesRoot(cfg), gate);
+  const files = existsSync(root) ? readdirSync(root, { recursive: true }).map(String).filter((f) => basename(dirname(f)) === 'findings' && f.endsWith('.md') && statSync(join(root, f)).mtimeMs >= since) : [];
+  const rows = [];
+  for (const s of steps) {
+    const path = resolve(cfg.repo, s.arg);
+    const shown = existsSync(path) ? null : exec('git', ['-C', cfg.repo, 'show', `HEAD:${s.arg}`], { ok: true });
+    if (shown?.status) {
+      console.error(`lc-gate: ${s.id}: question file ${s.arg} not found; skipped`);
+      continue;
+    }
+    const qs = questions(shown ? shown.stdout : readFileSync(path, 'utf8'));
+    const mine = files.filter((f) => basename(f).split('.')[0] === s.id);
+    const counts = qs.map((q, i) => ({ step: s.id, q: `Q${i + 1}`, question: q, reviews: mine.length, applied: 0, p1: 0, p2: 0, p3: 0 }));
+    for (const f of mine) {
+      const answers = answerRows(readFileSync(join(root, f), 'utf8'));
+      for (const c of counts) {
+        const row = answers.get(Number(c.q.slice(1)));
+        if (!row) continue;
+        if (/^yes\b/i.test(row[2] ?? '')) c.applied++;
+        const v = row[4] ?? '';
+        if (/^p1\b/i.test(v)) c.p1++;
+        else if (/^(p2|must-fix)\b/i.test(v)) c.p2++;
+        else if (/^(p3|comment)\b/i.test(v)) c.p3++;
+      }
+    }
+    rows.push(...counts);
+  }
+  const head = ['step', 'Q', 'reviews', 'applied', 'P1', 'P2', 'P3', 'question'];
+  const line = (r) => [r.step, r.q, r.reviews, r.applied, r.p1, r.p2, r.p3, r.question.replace(/\*\*/g, '')].map(String);
+  if (flags.md) {
+    console.log(`| ${head.join(' | ')} |\n|${head.map(() => ' --- ').join('|')}|`);
+    for (const r of rows) console.log(`| ${line(r).map(cell).join(' | ')} |`);
+  } else {
+    const all = [head, ...rows.map(line)];
+    const width = head.map((_, i) => Math.max(...all.map((r) => (i < head.length - 1 ? r[i].length : 0))));
+    for (const r of all) console.log(r.map((c, i) => (i < r.length - 1 ? c.padEnd(width[i]) : c.slice(0, 100))).join('  '));
+  }
+  console.log(`${files.length} findings file(s) under ${root}${flags.since ? ` since ${flags.since}` : ''}`);
+  return 0;
+}
+
 // `lc-gate questions <file>`: the rows a session's findings file answers.
 function listQuestions(file, cwd) {
   if (!file) die('usage: lc-gate questions <question file>');
@@ -1597,7 +1834,7 @@ function listQuestions(file, cwd) {
 
 // --- main --------------------------------------------------------------------------------------
 
-const BOOLEAN = new Set(['carry', 'write', 'trailer', 'staged', 'files', 'strict', 'md', 'yes']);
+const BOOLEAN = new Set(['carry', 'write', 'trailer', 'staged', 'files', 'strict', 'md', 'yes', 'lead', 'wait']);
 function parseArgs(argv) {
   const pos = [];
   const flags = {};
@@ -1615,8 +1852,8 @@ export async function main(argv, cwd = process.cwd()) {
   const [cmd, ...rest] = argv;
   const repo = exec('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { ok: true }).stdout.trim() || cwd;
   const { pos, flags } = parseArgs(rest);
-  const commands = { run, record, status, hook, merge, enforcement, protect, questions: (r, p) => listQuestions(p[0], cwd), 'plan-check': (r, p, f) => planCheck(r, p, f, cwd), check: (r, p, f) => (f.diff ? checkPhaseDiff(r, f.diff, p[1]) : checkGate(r, p, f)) };
-  if (!commands[cmd]) die(`usage: lc-gate run|record|status|check|merge|questions|plan-check|hook|enforcement|protect …; see the top of gate/gate.mjs`);
+  const commands = { run, record, status, hook, merge, enforcement, protect, tally, questions: (r, p) => listQuestions(p[0], cwd), 'plan-check': (r, p, f) => planCheck(r, p, f, cwd), check: (r, p, f) => (f.diff ? checkPhaseDiff(r, f.diff, p[1]) : checkGate(r, p, f)) };
+  if (!commands[cmd]) die(`usage: lc-gate run|record|status|check|merge|questions|tally|plan-check|hook|enforcement|protect …; see the top of gate/gate.mjs`);
   return (await commands[cmd](repo, pos, flags)) ?? 0;
 }
 

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Park a session that only waits, and start it again later on the same brief.
+#   lc-park <session> --resume "<point>"   writes the resume point beside the session's brief
+#                                          (<brief>.resume.md) and closes its window
+#   lc-park resume <session>               starts it again with lc-spawn: the same brief and workdir, and
+#                                          the resume point
+# The brief and workdir are the session's last line in the board's spawned.tsv (lc-spawn writes it).
+set -uo pipefail
+. "$(dirname "$(readlink -f "$0")")/lc-lib.sh"
+bin=$(dirname "$(readlink -f "$0")")
+usage() { echo 'usage: lc-park <session> --resume "<point>" | lc-park resume <session>' >&2; exit 2; }
+spawned() { # the session's brief and workdir, tab-separated
+  awk -F'\t' -v n="$1" '$1 == n { b = $2; d = $3 } END { if (b) print b "\t" d }' "$(lc_board_dir "$PWD")/spawned.tsv" 2>/dev/null
+}
+session=${LC_TMUX_SESSION:-$(lc_conf "$PWD" tmux_session agents)}
+if [[ ${1:-} == resume ]]; then
+  [[ $# -eq 2 ]] || usage
+  name=$2
+  IFS=$'\t' read -r brief dir <<<"$(spawned "$name")"
+  [[ -n ${brief:-} ]] || { echo "lc-park: no brief for $name in spawned.tsv" >&2; exit 1; }
+  resume=${brief%.md}.resume.md
+  [[ -f $resume ]] || { echo "lc-park: $name is not parked: no $resume" >&2; exit 1; }
+  if timeout 10 tmux list-windows -t "$session" -F $'#{window_id}\t#W' 2>/dev/null | awk -F'\t' -v w="$name" '$2 == w { f = 1 } END { exit !f }'; then
+    echo "lc-park: $name still has a window in $session; nothing started" >&2; exit 1
+  fi
+  LC_RESUME=$resume exec "$bin/lc-spawn" "$name" "$dir" "$brief"
+fi
+[[ $# -eq 3 && $2 == --resume && -n $3 ]] || usage
+name=$1
+IFS=$'\t' read -r brief dir <<<"$(spawned "$name")"
+[[ -n ${brief:-} ]] || { echo "lc-park: no brief for $name in spawned.tsv; only a session lc-spawn started can be parked" >&2; exit 1; }
+resume=${brief%.md}.resume.md
+printf '# Resume point: %s\n\nParked %s. %s\n' "$name" "$(date '+%Y-%m-%d %H:%M')" "$3" >"$resume"
+"$bin/lc-close" "$name" >/dev/null
+echo "parked $name: resume point in $resume; lc-park resume $name starts it again"

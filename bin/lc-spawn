@@ -4,6 +4,8 @@
 # Settings come from the `sessions:` block of <workdir>'s .agents/project.yaml;
 # LC_TMUX_SESSION, LC_AGENT_CMD, LC_MODEL, LC_EFFORT, LC_AGENT_FLAGS override them.
 # The session gets LC_SESSION=<name>, and LC_GATE_STEP when lc-spawn is given one (lc-gate run).
+# LC_RESUME=<file> (lc-park resume) adds a resume point to the prompt. With sessions.memory_floor_mb set,
+# it starts nothing while less memory is available.
 # For claude, it watches the new window for up to LC_TRUST_WAIT seconds (15): Claude Code's
 # folder-trust prompt is answered for a folder inside a worktree of the repository lc-spawn runs in
 # (else <workdir>'s) or its handoff_dir; for any other folder it says the session waits on it. It says
@@ -23,6 +25,16 @@ effort=${LC_EFFORT:-$(lc_conf "$dir" effort)}
 flags=${LC_AGENT_FLAGS:-$(lc_conf "$dir" agent_flags)}
 open_tab=${LC_OPEN_TAB:-$(lc_conf "$dir" open_tab)}
 prompt="Read $brief in full and carry out that brief now."
+[[ -n ${LC_RESUME:-} ]] && prompt="Read $brief in full, then the resume point in $LC_RESUME, and carry on from that point."
+floor=$(lc_conf "$dir" memory_floor_mb)
+if [[ -n $floor ]]; then
+  [[ $floor =~ ^[0-9]+$ ]] || { echo "lc-spawn: sessions.memory_floor_mb is \"$floor\": a whole number of MB" >&2; exit 1; }
+  avail=$(awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo 2>/dev/null)
+  if [[ -n $avail ]] && ((avail < floor)); then
+    echo "lc-spawn: $avail MB available, under sessions.memory_floor_mb ($floor MB): $name not started" >&2
+    exit 1
+  fi
+fi
 
 case "$agent" in
   claude)

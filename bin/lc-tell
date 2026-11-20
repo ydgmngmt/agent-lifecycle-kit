@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Tell a session one line. It is appended to <handoff_dir>/tell.log (time, sender, receiver, line; else
+# .agents/tell.log) and typed into the receiver's tmux window as a message. `lead` is the session
+# named in sessions.lead. The sender is LC_SESSION, else sessions.lead, else "lead".
+# Usage: lc-tell <session|lead> "<line>"   (tmux session: LC_TMUX_SESSION, else the project file of $PWD)
+set -uo pipefail
+[[ $# -eq 2 && -n $2 ]] || { echo 'usage: lc-tell <session|lead> "<line>"' >&2; exit 2; }
+. "$(dirname "$(readlink -f "$0")")/lc-lib.sh"
+to=$1
+line=${2//$'\n'/ }
+lead=$(lc_conf "$PWD" lead)
+if [[ $to == lead ]]; then
+  to=$lead
+  [[ -n $to ]] || { echo "lc-tell: no sessions.lead in .agents/project.yaml: name the lead's tmux window there" >&2; exit 1; }
+fi
+from=${LC_SESSION:-${lead:-lead}}
+session=${LC_TMUX_SESSION:-$(lc_conf "$PWD" tmux_session agents)}
+root=$(timeout 10 git rev-parse --show-toplevel 2>/dev/null || pwd)
+handoff=$(lc_get "$root" handoff_dir)
+dir=${handoff:-$root/.agents}
+mkdir -p "$dir"
+printf '%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$from" "$to" "$line" >>"$dir/tell.log"
+if ! timeout 10 tmux list-windows -t "$session" -F $'#{window_id}\t#W' 2>/dev/null | awk -F'\t' -v w="$to" '$2 == w { found = 1 } END { exit !found }'; then
+  echo "lc-tell: no window $to in tmux session $session; the line is only in $dir/tell.log" >&2
+  exit 1
+fi
+# Typed, then Enter a moment later, so the agent takes it as one message.
+timeout 10 tmux send-keys -t "$session:$to" -l "from $from: $line" && sleep 0.3 && timeout 10 tmux send-keys -t "$session:$to" Enter || { echo "lc-tell: tmux could not type into $session:$to" >&2; exit 1; }
+echo "told $to"

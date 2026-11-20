@@ -17,8 +17,11 @@
 // Sessions lc-spawn started: <data dir>/spawned.tsv. A session's note defaults to its brief's title, and
 // its branch finds its PR; a window lc-spawn did not start shows them from its prompt and pane path.
 // GET /api/stale lists what is probably out of date (staleList); board/cli.mjs changes state.json.
+// Read afterwards: <data dir>/read-afterwards.jsonl, the owner steps the lead set aside (lc-gate record).
+// Each line added to answers.jsonl is told to the lead (lc-tell lead; answers.told keeps the offset).
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync, watchFile, writeFileSync } from 'node:fs';
 import { readFile, appendFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -318,6 +321,57 @@ const answers = async () =>
     }
   });
 
+// The owner steps the lead recorded N/A, newest first: { gate, id, step, commit, reason, by, at }.
+const afterwards = async () =>
+  (await text(join(dataDir, 'read-afterwards.jsonl'))).split('\n').filter(Boolean).flatMap((l) => {
+    try {
+      return [JSON.parse(l)];
+    } catch {
+      return [];
+    }
+  }).reverse();
+
+// Tells the lead each answer added to answers.jsonl since the offset in answers.told (from the end of
+// the file the first time), with lc-tell lead, as session "board".
+function tellAnswers() {
+  const path = join(dataDir, 'answers.jsonl');
+  const told = join(dataDir, 'answers.told');
+  if (!existsSync(dataDir)) return;
+  const size = existsSync(path) ? statSync(path).size : 0;
+  let from = existsSync(told) ? Number(readFileSync(told, 'utf8')) || 0 : size;
+  if (size < from) from = 0;
+  if (size > from) {
+    const buf = Buffer.alloc(size - from);
+    const fd = openSync(path, 'r');
+    readSync(fd, buf, 0, buf.length, from);
+    closeSync(fd);
+    const chunk = buf.toString('utf8');
+    const whole = chunk.slice(0, chunk.lastIndexOf('\n') + 1);
+    from += Buffer.byteLength(whole);
+    let qs = [];
+    try {
+      qs = JSON.parse(readFileSync(join(dataDir, 'questions.json'), 'utf8'));
+    } catch {
+      // no questions file: the id alone
+    }
+    for (const line of whole.split('\n').filter(Boolean)) {
+      let a;
+      try {
+        a = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const q = qs.find((x) => x.id === a.id);
+      const choice = a.choice != null ? q?.options?.[a.choice]?.label : null;
+      const said = `board answer to ${a.id}${q?.title ? ` (${q.title})` : ''}: ${[choice, a.text?.trim()].filter(Boolean).join(': ') || '(empty)'}`;
+      execFile(join(here, '../bin/lc-tell'), ['lead', said], { cwd: repo, timeout: 20_000, env: { ...process.env, LC_SESSION: 'board' } }, (err, _out, errOut) => {
+        if (err) console.error(`lc-tell lead failed for ${a.id}: ${String(errOut || err.message).trim()}`);
+      });
+    }
+  }
+  writeFileSync(told, String(from));
+}
+
 // The step rows of the gates run most recently (gate/gate.mjs); a broken gate file never breaks the page.
 const gates = () => {
   try {
@@ -371,6 +425,7 @@ async function snapshot() {
     spawned: [...spawns.keys()],
     sessions: live.map(({ title, ...x }) => ({ ...x, note: state.sessions?.[x.name] || title })),
     gates: gates(),
+    afterwards: await afterwards(),
     questions: questions.map((q) => ({ ...q, answer: answered.get(q.id) ?? null, outcome: state.outcomes?.[q.id] ?? null })),
     at: new Date().toISOString(),
   };
@@ -426,6 +481,8 @@ createServer((req, res) =>
     if (!res.headersSent) send(res, 500, 'text/plain', 'board error; see server.log');
   }),
 ).listen(port, '127.0.0.1', () => console.log(`ADLC board on http://localhost:${port} (data ${dataDir})`));
+tellAnswers();
+watchFile(join(dataDir, 'answers.jsonl'), { interval: 1000 }, tellAnswers);
 
 async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
@@ -449,6 +506,7 @@ async function handle(req, res) {
     if (typeof body.id !== 'string') return send(res, 400, 'text/plain', 'missing id');
     const entry = { id: body.id, choice: Number.isInteger(body.choice) ? body.choice : null, text: String(body.text ?? ''), at: new Date().toISOString() };
     await appendFile(join(dataDir, 'answers.jsonl'), JSON.stringify(entry) + '\n');
+    tellAnswers();
     return send(res, 200, 'application/json', '{"ok":true}');
   }
   send(res, 404, 'text/plain', 'not found');

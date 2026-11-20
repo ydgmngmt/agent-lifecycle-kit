@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Append one line to the phase's running log (board.running_log), stamped with the clock and the sender
+# (LC_SESSION, else "lead"): "- <date time>: <line> (<sender>)". A line the owner must act on starts with
+# FOR THE OWNER.
+# Usage: lc-log "<line>"
+set -uo pipefail
+[[ $# -eq 1 && -n $1 ]] || { echo 'usage: lc-log "<line>"' >&2; exit 2; }
+. "$(dirname "$(readlink -f "$0")")/lc-lib.sh"
+log=$(lc_get "$PWD" board.running_log)
+[[ -n $log ]] || { echo "lc-log: no board.running_log in .agents/project.yaml" >&2; exit 1; }
+mkdir -p "$(dirname "$log")"
+printf -- '- %s: %s (%s)\n' "$(date '+%Y-%m-%d %H:%M')" "${1//$'\n'/ }" "${LC_SESSION:-lead}" >>"$log"
+echo "logged in $log"

@@ -44,6 +44,7 @@ exit 0
     windows: (text) => writeFileSync(join(fake, 'windows'), text),
     lc: (...args) => run('node', [GATE, ...args]),
     spawn: (dir, cwd) => run(join(KIT, 'bin/lc-spawn'), ['s1', dir, join(repo, 'q.md')], cwd),
+    bin: (name, args, more = {}) => spawnSync(join(KIT, 'bin', name), args, { cwd: repo, encoding: 'utf8', env: { ...env, ...more } }),
   };
 }
 
@@ -265,7 +266,7 @@ test('commits on top of a passed review get a review of the change since the pas
   assert.match(b, new RegExp(`git diff ${c1} ${f.sh('git rev-parse HEAD')}`));
 });
 
-test('with a P1 or P2 still open after two reviews after a fix, run starts no further session: the lead decides', () => {
+test('two follow-up reviews ended in FAIL (gate_rounds unset): run starts no further session, and names the one way on', () => {
   const f = fixture(SESSION);
   f.pane('working\n');
   f.lc('run', 'phase', 'x', '--base', 'HEAD');
@@ -280,7 +281,7 @@ test('with a P1 or P2 still open after two reviews after a fix, run starts no fu
   f.sh('git commit -q --allow-empty -m fix3');
   const r = f.lc('run', 'phase', 'x', '--candidate', 'HEAD', '--rerun', 'review');
   assert.doesNotMatch(r.stdout, /started session/);
-  assert.match(r.stdout, /still open after two reviews after a fix.*the lead decides/);
+  assert.match(r.stdout, /2 follow-up review\(s\) ended in FAIL \(sessions\.gate_rounds 2\): no further session\. The one way on: lc-gate run phase x --rerun review --lead --reason "…"/);
   assert.equal(f.calls().split('\n').filter((l) => l.startsWith('new-')).length, 3);
 });
 
@@ -344,10 +345,10 @@ test('a hand-resolved merge of main is not held: the follow-up review reads exac
   assert.match(f.lc('run', 'pr', 'feat').stdout, /reviewer\s+session\s+PASS/);
   f.sh("git checkout -q main && sed -i 's/two/MAINTWO/' f.txt && echo MAINLINE > m.txt && git add m.txt && git commit -qam main && git checkout -q feat");
   f.sh("git merge -q --no-edit main >/dev/null 2>&1 || true; printf 'one\\nRESOLVED\\n' > f.txt && git add f.txt && git commit -qm 'merge main by hand'");
+  // The PASS at an ancestor no longer holds: its follow-up review starts by itself.
   const stale = f.lc('run', 'pr', 'feat');
   assert.match(stale.stdout, /that do not: reviewer/, stale.stdout + stale.stderr);
-  assert.match(stale.stdout, /reviewer\s+session\s+stale: PASS/);
-  f.lc('run', 'pr', 'feat', '--rerun', 'reviewer');
+  assert.match(stale.stdout, /reviewer\s+session\s+started session/);
   const scope = scopeOf(f);
   assert.match(scope, /^\+RESOLVED$/m);
   assert.doesNotMatch(scope, /MAINLINE/);
@@ -380,4 +381,141 @@ test('a follow-up review keeps git diff as its scope in the phase gate and after
   const brief = readFileSync(join(g.repo, 'state/gates/pr/feat/briefs', `reviewer-${h.slice(0, 12)}.md`), 'utf8');
   assert.match(brief, new RegExp(`git diff ${x} ${h}`));
   assert.doesNotMatch(brief, /remerge-diff/);
+});
+
+test('a follow-up review starts by itself, with no --rerun, once its after holds', () => {
+  const f = fixture('handoff_dir: $STATE\ngate_phase:\n  check: here a look\n  review: session q.md after check\n');
+  f.pane('working\n');
+  const look = () => f.lc('record', 'phase', 'x', 'check', 'pass', '--evidence', 'q.md', '--candidate', 'HEAD');
+  assert.match(f.lc('run', 'phase', 'x', '--base', 'HEAD').stdout, /review\s+session\s+waits until check passes/);
+  look();
+  assert.match(f.lc('run', 'phase', 'x').stdout, /review\s+session\s+started session gate-x-review/);
+  failAt(f, f.sh('git rev-parse HEAD'));
+  f.sh('git commit -q --allow-empty -m fix');
+  assert.match(f.lc('run', 'phase', 'x', '--candidate', 'HEAD').stdout, /review\s+session\s+waits until check passes or is N\/A/);
+  look();
+  const r = f.lc('run', 'phase', 'x', '--candidate', 'HEAD');
+  assert.match(r.stdout, /review\s+session\s+started session gate-x-review on/, r.stdout + r.stderr);
+  assert.match(briefAt(f), /Scope: a review after a fix/);
+  assert.equal(f.calls().split('\n').filter((l) => l.startsWith('new-')).length, 2);
+});
+
+test('sessions.gate_rounds counts follow-up reviews ended in FAIL; at the count only --lead with a reason starts one more, kept in the history', () => {
+  const f = fixture(`${SESSION}sessions:\n  gate_rounds: 1\n`);
+  f.pane('working\n');
+  f.lc('run', 'phase', 'x', '--base', 'HEAD');
+  failAt(f, f.sh('git rev-parse HEAD'));
+  f.sh('git commit -q --allow-empty -m fix1');
+  assert.match(f.lc('run', 'phase', 'x', '--candidate', 'HEAD').stdout, /started session/);
+  failAt(f, f.sh('git rev-parse HEAD'));
+  f.sh('git commit -q --allow-empty -m fix2');
+  const r = f.lc('run', 'phase', 'x', '--candidate', 'HEAD');
+  assert.match(r.stdout, /review\s+session\s+1 follow-up review\(s\) ended in FAIL \(sessions\.gate_rounds 1\): no further session\. The one way on: lc-gate run phase x --rerun review --lead --reason "…"/, r.stdout + r.stderr);
+  assert.match(f.lc('run', 'phase', 'x', '--rerun', 'review').stdout, /no further session/);
+  assert.match(f.lc('run', 'phase', 'x', '--rerun', 'review', '--lead').stderr, /--rerun <step> --lead --reason/);
+  assert.match(f.lc('status', 'phase', 'x').stdout, /follow-up reviews ended in FAIL \(sessions\.gate_rounds 1\): review 1/);
+  const lead = f.lc('run', 'phase', 'x', '--rerun', 'review', '--lead', '--reason', 'the fix only renames a test');
+  assert.match(lead.stdout, /started session gate-x-review past sessions\.gate_rounds, by the lead: the fix only renames a test/, lead.stdout + lead.stderr);
+  const rec = JSON.parse(readFileSync(join(f.repo, 'state/gates/phase/x/records/review.json'), 'utf8'));
+  assert.deepEqual({ ...rec.history.at(-1), at: 'x' }, { lead: true, sha: f.sh('git rev-parse HEAD'), reason: 'the fix only renames a test', by: process.env.LC_SESSION || 'lead', at: 'x' });
+  assert.equal(f.calls().split('\n').filter((l) => l.startsWith('new-')).length, 3);
+});
+
+test('a session gone with no window and no record is started again once; the second time run says so', () => {
+  const f = fixture(SESSION);
+  f.pane('working\n');
+  assert.match(f.lc('run', 'phase', 'x', '--base', 'HEAD').stdout, /started session gate-x-review on/);
+  writeFileSync(join(f.repo, 'state/gates/phase/x/findings/review.md'), 'half a table');
+  const again = f.lc('run', 'phase', 'x');
+  assert.match(again.stdout, /started session gate-x-review again: it was gone with no window and no record \(once\)/, again.stdout + again.stderr);
+  assert.ok(existsSync(join(f.repo, `state/gates/phase/x/findings/review.gone-${f.sh('git rev-parse --short=12 HEAD')}.md`)));
+  const third = f.lc('run', 'phase', 'x');
+  assert.match(third.stdout, /session gate-x-review ended without a record, also after one start again; start it again with --rerun review/);
+  assert.equal(f.calls().split('\n').filter((l) => l.startsWith('new-')).length, 2);
+});
+
+// A stacked PR: its base on the host is another branch, so the review reads only its own commits.
+test("a PR gate's base is the PR's base branch on the host when it is not the default branch; with no PR, run names the gated branch in the diff", () => {
+  const f = fixture(PRGATE);
+  f.pane('working\n');
+  writeFileSync(join(f.fake, 'gh'), `#!/bin/sh\necho "$*" >> "${f.fake}/gh.log"\n[ -f "${f.fake}/nopr" ] && exit 1\ncase "$*" in *"pr view feat --json baseRefName"*) echo '{"baseRefName":"parent"}' ;; *) exit 1 ;; esac\n`, { mode: 0o755 });
+  f.sh('git remote add origin /nowhere && git checkout -q -b parent && echo p > p.txt && git add p.txt && git commit -qm parent && git update-ref refs/remotes/origin/parent HEAD');
+  const parent = f.sh('git rev-parse HEAD');
+  f.sh('git checkout -q -b feat && echo f > f.txt && git add f.txt && git commit -qm feat');
+  const r = f.lc('run', 'pr', 'feat');
+  assert.match(r.stdout, new RegExp(`base ${parent.slice(0, 12)}; base: the merge-base with parent, the PR's base branch on the host`), r.stdout + r.stderr);
+  assert.match(readFileSync(join(f.repo, 'state/gates/pr/feat/gate.json'), 'utf8'), new RegExp(`"base": "${parent}"`));
+  // No PR yet, and parent has a gate of its own: as before, and run says so.
+  writeFileSync(join(f.fake, 'nopr'), '');
+  f.lc('run', 'pr', 'parent', '--candidate', parent);
+  const n = f.lc('run', 'pr', 'feat');
+  assert.match(n.stdout, /base [0-9a-f]{12}; no PR on the host says this branch's base, and its diff to the default branch holds commits of parent, a branch with a gate: pass --base parent/, n.stdout + n.stderr);
+  assert.equal(JSON.parse(readFileSync(join(f.repo, 'state/gates/pr/feat/gate.json'), 'utf8')).base, f.sh('git rev-parse main'));
+});
+
+test('sessions.gate_flags replaces sessions.agent_flags for the sessions lc-gate run starts, {kit} the kit directory', () => {
+  const f = fixture(`${SESSION}sessions:\n  agent_flags: --wide-open\n  gate_flags: --strict-mcp-config --plugin-dir {kit}\n`);
+  f.pane('working\n');
+  f.lc('run', 'phase', 'x', '--base', 'HEAD');
+  const started = f.calls().split('\n').find((l) => l.startsWith('new-'));
+  assert.ok(started.includes(`claude --strict-mcp-config --plugin-dir ${KIT.replace(/\/$/, '')} `), started);
+  assert.doesNotMatch(started, /--wide-open/);
+  const g = fixture(`${SESSION}sessions:\n  agent_flags: --wide-open\n`);
+  g.pane('working\n');
+  g.lc('run', 'phase', 'x', '--base', 'HEAD');
+  assert.match(g.calls(), /claude --wide-open/);
+});
+
+test('lc-spawn starts nothing while less memory is available than sessions.memory_floor_mb', () => {
+  const f = fixture(`${SESSION}sessions:\n  memory_floor_mb: 99999999\n`);
+  f.pane('working\n');
+  const r = f.spawn(f.repo, f.repo);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /MB available, under sessions\.memory_floor_mb \(99999999 MB\): s1 not started/);
+  assert.ok(!existsSync(join(f.fake, 'calls')) || !/new-/.test(f.calls()));
+  assert.match(f.lc('run', 'phase', 'x', '--base', 'HEAD').stdout, /review\s+session\s+not started: .*memory_floor_mb/);
+  const g = fixture(`${SESSION}sessions:\n  memory_floor_mb: 1\n`);
+  g.pane('working\n');
+  assert.equal(g.spawn(g.repo, g.repo).status, 0);
+});
+
+test('lc-tell logs the line and types it into the receiver\'s window; lead is sessions.lead', () => {
+  const f = fixture('handoff_dir: $STATE\nsessions:\n  lead: orch\n');
+  f.windows('@3\torch\n@4\timpl\n');
+  const r = f.bin('lc-tell', ['lead', 'PR feat holds'], { LC_SESSION: 'impl' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(f.calls(), /^send-keys -t agents:orch -l from impl: PR feat holds\nsend-keys -t agents:orch Enter$/m);
+  assert.match(readFileSync(join(f.repo, 'state/tell.log'), 'utf8'), /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\timpl\torch\tPR feat holds$/m);
+  const gone = f.bin('lc-tell', ['nobody', 'hello'], { LC_SESSION: 'impl' });
+  assert.equal(gone.status, 1);
+  assert.match(gone.stderr, /no window nobody .*only in .*tell\.log/);
+  assert.match(readFileSync(join(f.repo, 'state/tell.log'), 'utf8'), /\timpl\tnobody\thello$/m);
+  const g = fixture('handoff_dir: $STATE\n');
+  assert.match(g.bin('lc-tell', ['lead', 'x']).stderr, /no sessions\.lead/);
+});
+
+test('lc-log appends a line stamped with the clock and the sender to board.running_log', () => {
+  const f = fixture('handoff_dir: $STATE\nboard:\n  running_log: $STATE/run.log\n');
+  assert.equal(f.bin('lc-log', ['FOR THE OWNER merged feat'], { LC_SESSION: 'orch' }).status, 0);
+  assert.match(readFileSync(join(f.repo, 'state/run.log'), 'utf8'), /^- \d{4}-\d\d-\d\d \d\d:\d\d: FOR THE OWNER merged feat \(orch\)\n$/);
+  assert.match(fixture('x: 1\n').bin('lc-log', ['x']).stderr, /no board\.running_log/);
+});
+
+test('lc-park writes the resume point beside the brief and closes the window; lc-park resume starts it on both', () => {
+  const f = fixture(SESSION);
+  f.pane('working\n');
+  mkdirSync(join(f.repo, 'state/board'), { recursive: true });
+  assert.equal(f.spawn(f.repo, f.repo).status, 0);
+  const p = f.bin('lc-park', ['s1', '--resume', 'waits for the parent PR; then rerun the gate']);
+  assert.equal(p.status, 0, p.stderr);
+  assert.match(readFileSync(join(f.repo, 'q.resume.md'), 'utf8'), /waits for the parent PR; then rerun the gate/);
+  assert.match(f.calls(), /^kill-window -t agents:s1$/m);
+  f.windows('@7\ts1\n');
+  assert.match(f.bin('lc-park', ['resume', 's1']).stderr, /still has a window/);
+  f.windows('');
+  const r = f.bin('lc-park', ['resume', 's1']);
+  assert.equal(r.status, 0, r.stderr);
+  const started = f.calls().split('\n').filter((l) => l.startsWith('new-')).at(-1);
+  assert.match(started, /resume\\ point\\ in\\ .*q\.resume\.md/);
+  assert.match(f.bin('lc-park', ['resume', 'nobody']).stderr, /no brief for nobody/);
 });

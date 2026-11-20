@@ -683,3 +683,77 @@ test("a session's record is refused without a row per question, and a pass with 
   const listed = lc({}, 'questions', 'q.md');
   assert.match(listed.stdout, /^Q1 \*\*Types\.\*\*.*\nQ2 .*\nQ3 Who owns/);
 });
+
+// Right after a push the host may list no run yet: a commit a remote branch holds is not asked about.
+test('a checks step with no run on a commit a remote branch holds says no run yet, not "is the head pushed?"', () => {
+  const { lc, git } = project('handoff_dir: $STATE\nci:\n  required_checks: verify-pr\ngate_pr:\n  ci: checks\n');
+  git('git checkout -q -b feat && git commit -q --allow-empty -m work && git update-ref refs/remotes/origin/feat HEAD');
+  const gh = fakeGh();
+  gh.set('runs.json', '');
+  const r = lc(gh.env, 'run', 'pr', 'feat');
+  assert.match(r.stdout, /no check run on [0-9a-f]{12} yet; the host has not listed its runs/, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stdout, /is the head pushed/);
+});
+
+test("a step's if reads the base's paths too: a change that drops its own file from them still gets the step", () => {
+  const { lc, git } = project('handoff_dir: $STATE\npaths:\n  protected: rules.txt\ngate_pr:\n  approve: here the owner read it if protected\n');
+  git('echo a > rules.txt && git add rules.txt && git commit -qm rules && git checkout -q -b feat');
+  git("sed -i 's#protected: rules.txt#protected: other.txt#' .agents/project.yaml && echo b > rules.txt && git commit -qam 'loosen'");
+  const r = lc({}, 'run', 'pr', 'feat');
+  assert.match(r.stdout, /approve\s+here\s+yours: the owner read it/, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stdout, /N\/A/);
+});
+
+test('run --wait walks again until a step changes: a check finishing ends it with the walk', async () => {
+  const { repo, git } = project('handoff_dir: $STATE\nci:\n  required_checks: verify-pr\ngate_pr:\n  ci: checks\n');
+  git('git checkout -q -b feat && git commit -q --allow-empty -m work');
+  const gh = fakeGh();
+  gh.set('runs.json', checkRun('verify-pr', 'in_progress', null, 1));
+  const gate = fileURLToPath(new URL('./gate.mjs', import.meta.url));
+  const child = spawn('node', [gate, 'run', 'pr', 'feat', '--wait'], { cwd: repo, env: { ...process.env, ...gh.env, LC_GATE_STEP: '', LC_GATE_WAIT: '20', LC_GATE_WAIT_POLL: '0.3' } });
+  let out = '';
+  child.stdout.on('data', (d) => (out += d));
+  child.stderr.on('data', (d) => (out += d));
+  const done = new Promise((ok) => child.on('exit', ok));
+  await new Promise((ok) => setTimeout(ok, 1500));
+  assert.match(out, /waits for the checks/);
+  assert.doesNotMatch(out, /--wait:/);
+  gh.set('runs.json', checkRun('verify-pr', 'completed', 'success', 1));
+  assert.equal(await done, 0, out);
+  assert.match(out, /--wait: after \d+s, changed: ci\n[^]*ci\s+checks\s+PASS[^]*every step holds/);
+});
+
+test('run --wait ends at LC_GATE_WAIT with the last walk, and at once when nothing runs that could change a step', () => {
+  const { lc, git } = project('handoff_dir: $STATE\nci:\n  required_checks: verify-pr\ngate_pr:\n  ci: checks\n  self: here a look\n');
+  git('git checkout -q -b feat && git commit -q --allow-empty -m work');
+  const gh = fakeGh();
+  gh.set('runs.json', checkRun('verify-pr', 'in_progress', null, 1));
+  const r = lc({ ...gh.env, LC_GATE_WAIT: '1', LC_GATE_WAIT_POLL: '0.3' }, 'run', 'pr', 'feat', '--wait');
+  assert.match(r.stdout, /--wait: nothing changed in 1s \(LC_GATE_WAIT\); the last walk:\npr feat: candidate/, r.stdout + r.stderr);
+  gh.set('runs.json', checkRun('verify-pr', 'completed', 'success', 1));
+  const t = Date.now();
+  const idle = lc({ ...gh.env, LC_GATE_WAIT: '30' }, 'run', 'pr', 'feat', '--wait');
+  assert.match(idle.stdout, /--wait: nothing runs that could change a step[^]*the next move is yours/);
+  assert.ok(Date.now() - t < 10_000);
+});
+
+test('lc-gate tally counts, per question of a session step, its reviews, how often it applied and its P1 to P3 rows', () => {
+  const { repo, lc } = project('handoff_dir: $STATE\ngate_pr:\n  reviewer: session q.md\n');
+  writeFileSync(join(repo, 'q.md'), QFILE);
+  const put = (rel, rows) => {
+    mkdirSync(join(repo, 'state/gates/pr', rel, '..'), { recursive: true });
+    writeFileSync(join(repo, 'state/gates/pr', rel), rows.join('\n'));
+  };
+  put('a/findings/reviewer.md', [row(1, 'yes', 'a.js:1', 'P1: F1'), row(2, 'yes', 'b.js:2', 'sound'), row(3, 'no', 'none', 'n/a')]);
+  put('a/findings/reviewer.before-0123456789ab.md', [row(1, 'yes', 'a.js:1', 'must-fix'), row(2, 'yes', 'b.js:2', 'P3: F2'), row(3, 'no', 'none', 'n/a')]);
+  put('team/b/findings/reviewer.md', [row(1, 'yes', 'a.js:1', 'P2: F1'), row(2, 'no', 'none', 'n/a'), row(3, 'no', 'none', 'n/a')]);
+  const r = lc({}, 'tally', 'pr', '--md');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^\| step \| Q \| reviews \| applied \| P1 \| P2 \| P3 \| question \|$/m);
+  assert.match(r.stdout, /^\| reviewer \| Q1 \| 3 \| 3 \| 1 \| 2 \| 0 \| Types\. Are boundaries checked\? \|$/m);
+  assert.match(r.stdout, /^\| reviewer \| Q2 \| 3 \| 2 \| 0 \| 0 \| 1 \|/m);
+  assert.match(r.stdout, /^\| reviewer \| Q3 \| 3 \| 0 \| 0 \| 0 \| 0 \|/m);
+  assert.match(lc({}, 'tally', 'pr').stdout, /^reviewer\s+Q1\s+3\s+3\s+1\s+2\s+0\s+Types/m);
+  assert.match(lc({}, 'tally', 'pr', '--since', '2999-01-01').stdout, /^reviewer\s+Q1\s+0\s+0\s+0\s+0\s+0/m);
+  assert.match(lc({}, 'tally', 'pr', '--since', 'soon').stderr, /not a date/);
+});
