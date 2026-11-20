@@ -3,7 +3,7 @@
 //
 // Five strengths, weakest last: the host refuses (required checks on a protected default branch,
 // administrators included); a local hook refuses (earlier and cheaper); an independent record (the
-// runner from a command's exit or a CI run, a separate session, the owner); the author's own word,
+// runner from a command's exit, a CI run or the host's checks, a separate session, the owner); the author's own word,
 // which is never a gate step. Every gh call has a timeout (LC_GATE_GH_TIMEOUT ms, default 20s).
 import { spawnSync } from 'node:child_process';
 import { accessSync, constants, existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -115,6 +115,7 @@ function gitHook(repo) {
 const BY = {
   command: 'the runner, from the command\'s exit at the head',
   workflow: 'the runner, from the CI run titled with the candidate',
+  checks: 'the runner, from the host\'s check runs on the exact commit',
   session: 'a separate session lc-gate run starts',
   here: 'the author',
   owner: 'the owner, on the board',
@@ -163,18 +164,17 @@ function rows(repo) {
   const L = 'local hook refuses';
   const hook = gitHook(repo);
   add(L, 'git pre-commit hook (core.hooksPath)', 'git, for every agent and person', 'a commit of planned files without the plan', hook.on ? `on: ${hook.shown}` : `off: ${hook.note}`, planned.length > 0 && planMode.mode !== 'off');
-  add(L, 'Claude Code plugin hook', 'Claude Code, on this machine', 'an edit or commit without the plan; gh pr merge, or git merge into the default branch, without the records', pluginOn(repo) ? 'on' : 'off: the agent-lifecycle-kit plugin is not enabled in Claude Code settings', prSteps.length > 0 && prMode.mode !== 'off');
+  add(L, 'Claude Code plugin hook', 'Claude Code, on this machine', 'an edit or commit without the plan; gh pr merge, or git merge into the default branch, without the records (lc-gate merge refuses the same itself)', pluginOn(repo) ? 'on' : 'off: the agent-lifecycle-kit plugin is not enabled in Claude Code settings', prSteps.length > 0 && prMode.mode !== 'off');
   const refusesBy = (m, what) => (m.mode === 'enforce' ? what : m.mode === 'off' ? 'nothing: off' : 'nothing yet: logged and told (observe)');
-  add('mode', 'gate_pr_mode', 'the project file', refusesBy(prMode, 'the hook at the gate start and at gh pr merge or git merge'), modeText(prMode), false);
+  add('mode', 'gate_pr_mode', 'the project file', refusesBy(prMode, 'lc-gate merge, and the hook at gh pr merge or git merge'), modeText(prMode), false);
   add('mode', 'gate_pr_plan', 'the project file', refusesBy(planMode, 'the hooks on edit and commit'), modeText(planMode), false);
 
   // The steps.
   for (const s of prSteps) {
     const own = s.kind === 'here';
-    const refuses = prMode.mode === 'off' ? 'nothing: gate_pr_mode is off' : `the hook ${s.afterGate ? 'at gh pr merge' : 'at the gate start and at gh pr merge'}${prMode.mode === 'observe' ? ' (observe: logged only)' : ''}`;
-    const who = s.afterGate && s.kind === 'command' ? 'the runner, from the review pipeline\'s result for the head' : BY[s.kind];
-    add(own ? 'author\'s own word' : 'independent record', `gate_pr ${s.id}: ${s.kind} ${s.arg}${s.if ? ` if ${s.if}` : ''}${s.plan ? ' plan' : ''}${s.afterGate ? ' after-gate' : ''}`, who, refuses,
-      own ? 'off: judges the author\'s own work; make it a session step, or a command after-gate step on the review pipeline\'s result' : 'on');
+    const refuses = prMode.mode === 'off' ? 'nothing: gate_pr_mode is off' : `lc-gate merge and the hook at gh pr merge${prMode.mode === 'observe' ? ' (observe: logged only)' : ''}`;
+    add(own ? 'author\'s own word' : 'independent record', `gate_pr ${s.id}: ${s.kind}${s.arg ? ` ${s.arg}` : ''}${s.if ? ` if ${s.if}` : ''}${s.plan ? ' plan' : ''}${s.after ? ` after ${s.after.join(',')}` : ''}`, BY[s.kind], refuses,
+      own ? 'off: judges the author\'s own work; make it a session or command step' : 'on');
     if (s.plan) add(L, `gate_pr ${s.id} plan, before the first edit and commit`, 'the author, before the work: a plan, which the step then checks', refusesBy(planMode, 'the plugin hook on edit and commit, and the git pre-commit hook'), planMode.mode === 'off' ? 'off: gate_pr_plan is off' : 'on', false);
   }
   const phaseCheck = flows.find((w) => /check phase --diff|from-base\.sh\S*\s.*\bphase\b/.test(w.text));
@@ -183,13 +183,11 @@ function rows(repo) {
       'lc-gate check phase --diff in CI, once the roadmap marks the phase done', phaseCheck ? 'on' : 'off: no workflow runs lc-gate check phase --diff', Boolean(checks.length));
   }
 
-  // Every PR reviewed, a prose-only diff included: with no `if`, the checklist's session step (by kind
-  // of diff), or an after-gate step on an outside review pipeline's result.
+  // Every PR reviewed, a prose-only diff included: the checklist's session step with no `if` (by kind of diff).
   const list = c['docs.review_checklist']?.split('#')[0];
   const reviewer = list && prSteps.find((s) => s.kind === 'session' && s.arg === list && !s.if);
-  const pipeline = prSteps.find((s) => s.afterGate && !s.if);
-  add('review', 'every PR reviewed: the checklist session, or the review pipeline after the gate', reviewer ? BY.session : 'the runner, from the review pipeline\'s result for the head', 'a false statement or a broken project rule, a prose-only diff included',
-    reviewer ? `on: gate_pr ${reviewer.id}, the checklist session` : pipeline ? `on: gate_pr ${pipeline.id}, an after-gate step` : `off: no gate_pr step without an \`if\` that is ${list ? `\`session ${list}\`` : 'the checklist session (set docs.review_checklist)'} or after-gate`, prSteps.length > 0);
+  add('review', 'every PR reviewed: the checklist session', BY.session, 'a false statement or a broken project rule, a prose-only diff included',
+    reviewer ? `on: gate_pr ${reviewer.id}, the checklist session` : `off: no gate_pr step without an \`if\` that is ${list ? `\`session ${list}\`` : 'the checklist session (set docs.review_checklist)'}`, prSteps.length > 0);
 
   // The mechanical rules (lc-rules), once the project has a rules file: in CI, or as a gate_pr command
   // step, which binds without a CI host.
@@ -224,7 +222,7 @@ function rows(repo) {
   const plugin = out.find((r) => r.what === 'Claude Code plugin hook').state.startsWith('on');
   const refusers = [
     hostOn && 'the host',
-    prSteps.length && prMode.mode === 'enforce' && plugin && 'the Claude Code plugin hook at the gate start and merge',
+    prSteps.length && prMode.mode === 'enforce' && plugin && 'the Claude Code plugin hook at merge',
     planned.length && planMode.mode === 'enforce' && (plugin || hook.on) && `the ${[plugin && 'Claude Code plugin', hook.on && 'git pre-commit'].filter(Boolean).join(' and ')} hook on edits and commits`,
   ].filter(Boolean);
   const hostWhy = () => (!checks.length ? noChecks : out.find((r) => r.layer === H && r.configured && !r.state.startsWith('on'))?.state);

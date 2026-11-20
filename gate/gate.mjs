@@ -2,20 +2,25 @@
 // when a step has no valid record. Node 18+, no dependencies.
 //
 //   lc-gate run <phase|pr> [id] [--candidate <sha>] [--base <sha>] [--rerun <step>[,<step>]]
-//                       idempotent walk: each step without a record gets the next thing for its kind;
-//                       a session step stale on a new candidate waits for --rerun or a carry
+//                       idempotent walk, in file order: each step without a record that holds gets the
+//                       next thing for its kind; a session step stale on a new candidate waits for
+//                       --rerun or a carry
 //   lc-gate record <gate> <id> <step> pass|fail|na --evidence <path|url> [--reason …] [--carry]
 //   lc-gate record <gate> <id> <step> plan --evidence <file> | plan na --reason …
 //                       a planned step's plan, at the base, refused once the work has a commit
 //   lc-gate status <gate> <id> [--candidate <sha>] [--write] [--trailer]
 //                       a table; --write generates the phase record, --trailer prints Verified-By
 //   lc-gate check <gate> <id> [--candidate <sha>]      exits 1 listing missing, stale or failed steps
+//   lc-gate merge pr [branch]
+//                       the one way a PR merges: updates a behind branch, waits for its checks step on
+//                       the head (LC_GATE_MERGE_WAIT seconds, 1800), requires every record, merges with
+//                       --match-head-commit and the Verified-By trailer; one merge at a time (merge.lock)
 //   lc-gate check phase --diff <base> <head>           the CI form, on the roadmap and phase records
 //   lc-gate plan-check [--staged] [--files <path>…]
 //                       exit 1 when a planned gate_pr step applies to these files on this branch and has
 //                       no plan record (gate_pr_plan: enforce); the git pre-commit hook and the edit hook
-//   lc-gate hook        the PreToolUse hook (hooks/hooks.json): the PR gate at its start and at merge
-//                       (gh pr merge, or git merge of a branch into the default branch);
+//   lc-gate hook        the PreToolUse hook (hooks/hooks.json): the PR gate at merge (gh pr merge, or
+//                       git merge of a branch into the default branch);
 //                       the plan on every Edit/Write and git commit, and no --no-verify while it applies
 //   lc-gate enforcement [--strict] [--md]
 //                       what makes each gate step binding here, layer by layer, and whether each is on
@@ -24,25 +29,34 @@
 //   lc-gate questions <file>  a question file's questions, Q1, Q2, …: the rows a session's findings answer
 //
 // gate_pr_mode and gate_pr_plan are off, observe, enforce, or `observe <n>`: enforce once <n> PRs have
-// merged with every record. The hook marks each merge it lets through: gates/pr/<id>/merged.json.
+// merged with every record. The hook and lc-gate merge mark each merge they let through:
+// gates/pr/<id>/merged.json.
 //
 // Step kinds: command (runs in the repo at the candidate, records its exit), workflow (dispatches
 // the GitHub workflow with -f candidate=<sha>, records the run whose title holds the candidate),
-// session (writes a brief from templates/gate-brief.md and lc-spawns it: a review after a fix when the
-// step failed at an earlier candidate this one descends from, none after two of those still fail; a PR's
-// brief names the implementer's brief from the board's spawned.tsv), here (the session
-// running the gate does it and records), owner (asks on the board; the answer is the record, or the
-// lead's N/A in a scratch or dry run, which the phase record states).
-// A `session` or `workflow` step starts at once; a command, here or owner step waits until every
-// step above it has a record. With `if <key>`, a diff with no file under paths.<key> is N/A.
-// The PR gate's id is its branch (branchId). The phase gate needs --base on its first run.
+// checks (no argument: the host's newest check run of each name in ci.required_checks on the exact
+// commit), session (writes a brief from templates/gate-brief.md and lc-spawns it: a full review first;
+// after a fail or a pass at an earlier candidate this one descends from, a follow-up review of the PR's
+// own change since, `git log -p --first-parent --remerge-diff`; none after two reviews after a fix
+// still fail; a PR's brief names the implementer's brief from the board's spawned.tsv), here (the
+// session running the gate does it and records), owner (asks on the board; the answer is the record,
+// or the lead's N/A in a scratch or dry run, which the phase record states and read-afterwards.jsonl
+// in the board's data dir lists).
+// A step with `after <step>[,<step>]` starts once each named step has a record that holds with PASS
+// or N/A. Without it, a session, workflow or checks step starts at once, and a command, here or owner
+// step waits until every step above it has a record. With `if <key>`, a diff with no file under
+// paths.<key> is N/A. The PR gate's id is its branch (branchId). The phase gate needs --base on its
+// first run.
 //
 // A gate is `phase` or `pr`; its steps are the block `gate_<gate>:` of the project file, one line
-// each: `<step>: <kind> <argument> [if <paths key>] [plan] [after-gate]`, kind command, workflow, session,
-// here or owner. A here or session step with `plan` also needs records/<step>.plan.json, made before
-// the first commit of the work (an N/A plan, from the lead, when the work had commits before the gate
-// saw it). An `after-gate` step is one only the review pipeline's result can satisfy: `check` and the
-// hook at the gate start skip it, the hook at merge and `status` require it, and `run` walks it last.
+// each, walked in file order: `<step>: <kind> <argument> [if <paths key>] [plan] [after <step>[,<step>]]`,
+// kind command, workflow, checks, session, here or owner; `after` names steps declared above. A here
+// or session step with `plan`, or a command step with `plan` and `after`, also needs
+// records/<step>.plan.json, made before the first commit of the work (an N/A plan, from the lead, when
+// the work had commits before the gate saw it).
+// A PR record holds for a later head when every commit between is a merge of main with no hand-resolved
+// line (prCurrent); a command step with `if` also holds across the PR's own change outside its paths;
+// a checks record only for its exact commit.
 // State: <handoff_dir>/gates/<gate>/<id>/ (else <repo>/.agents/gates/…): gate.json (candidate, base),
 // records/<step>.json (step, status, sha, evidence, by, at, reason; carried, spawned), records/<step>.plan.json
 // (the same with plan: true, sha the base, evidence a copy kept in evidence/), findings/,
@@ -64,7 +78,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, parseProject } from '../board/config.mjs';
 import { enforcement, protect } from './enforcement.mjs';
 
-export const KINDS = ['command', 'workflow', 'session', 'here', 'owner'];
+export const KINDS = ['command', 'workflow', 'checks', 'session', 'here', 'owner'];
 const STATUS = ['pass', 'fail', 'na'];
 const PLANNED_KINDS = ['here', 'session']; // the kinds a session does, so the kinds that can plan first
 export const KIT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -90,7 +104,7 @@ const git = (repo, ...args) => exec('git', ['-C', repo, ...args]).stdout.trim();
 
 // --- the step list -----------------------------------------------------------------------------
 
-// The steps of `gate_<gate>:` in file order: { id, kind, arg, if }.
+// The steps of `gate_<gate>:` in file order: { id, kind, arg, if, plan?, after? }.
 export function parseSteps(conf, gate) {
   const steps = [];
   const prefix = `gate_${gate}.`;
@@ -99,19 +113,30 @@ export function parseSteps(conf, gate) {
   for (const [key, value] of Object.entries(conf)) {
     if (!key.startsWith(prefix)) continue;
     const id = key.slice(prefix.length);
-    // A trailing `after-gate` marks a step that only the review pipeline's result can satisfy: the gate
-    // start skips it, the merge requires it. A `plan` before it marks a here or session step as planned,
-    // and an after-gate command step too (the author plans first, the pipeline's result is the final
-    // record); on any other step it stays part of the argument, as it always was.
-    const afterGate = /\safter-gate$/.test(value);
-    let rest = afterGate ? value.replace(/\s+after-gate$/, '') : value;
+    // `after-gate` (before 1.8) is never read as part of the argument: the order is now `after <step>`.
+    if (/(^|\s)after-gate(\s|$)/.test(value)) die(`${prefix}${id}: "after-gate" is gone; write "after <step>[,<step>]" last on the line, naming the steps this one waits for (docs/upgrading.md, 1.8)`);
+    // A trailing `after <step>[,<step>]`: the step starts once those have a record that holds, PASS or N/A.
+    const a = value.match(/\s+after\s+([\w-]+(?:\s*,\s*[\w-]+)*)$/);
+    const after = a ? a[1].split(/\s*,\s*/) : null;
+    let rest = a ? value.slice(0, a.index) : value;
+    for (const x of after ?? []) {
+      if (x === id || !steps.some((p) => p.id === x)) die(`${prefix}${id}: "after ${x}" names no step declared above it in gate_${gate}`);
+    }
+    // A `plan` before it marks a here or session step as planned, and a command step with `after` too
+    // (the author plans first, the command's result is the final record); on any other step it stays
+    // part of the argument, as it always was.
     const kind = rest.match(/^\S+/)?.[0];
-    const plan = (PLANNED_KINDS.includes(kind) || (kind === 'command' && afterGate)) && /\splan$/.test(rest);
+    const plan = (PLANNED_KINDS.includes(kind) || (kind === 'command' && after)) && /\splan$/.test(rest);
     if (plan) rest = rest.replace(/\s+plan$/, '');
-    const m = rest.match(/^(\S+)\s*(.*?)(?:\s+if\s+([\w-]+))?$/);
-    if (!m || !KINDS.includes(m[1])) die(`${prefix}${id}: "${value}" is not "<kind> <argument> [if <paths key>] [plan] [after-gate]" with kind ${KINDS.join(', ')}`);
+    // A trailing `if <key>`, read first, so a step with no argument keeps its condition.
+    const cond = rest.match(/\s+if\s+([\w-]+)$/);
+    if (cond) rest = rest.slice(0, cond.index);
+    const m = rest.match(/^(\S+)\s*(.*)$/);
+    if (m) m[3] = cond?.[1];
+    if (!m || !KINDS.includes(m[1])) die(`${prefix}${id}: "${value}" is not "<kind> <argument> [if <paths key>] [plan] [after <step>[,<step>]]" with kind ${KINDS.join(', ')}`);
     if (m[3] && !conf[`paths.${m[3]}`]) die(`${prefix}${id}: "if ${m[3]}" names no paths.${m[3]}`);
-    steps.push({ id, kind: m[1], arg: m[2], if: m[3] ?? null, ...(plan ? { plan } : {}), ...(afterGate ? { afterGate } : {}) });
+    if (m[1] === 'checks' && m[2]) die(`${prefix}${id}: a checks step takes no argument; it reads ci.required_checks`);
+    steps.push({ id, kind: m[1], arg: m[2], if: m[3] ?? null, ...(plan ? { plan } : {}), ...(after ? { after } : {}) });
   }
   return steps;
 }
@@ -119,18 +144,16 @@ export function parseSteps(conf, gate) {
 // --- the check ---------------------------------------------------------------------------------
 
 // Problems with a gate's records for candidate `sha`, one line per step; none means the gate holds.
-// `records` maps a step id to its record; `current(recordSha)` says whether a record's commit
-// counts for the candidate (exact match, or the PR gate's update-branch rule, prCurrent). `start`:
-// the check at the gate start, before the review pipeline ran, which skips the after-gate steps.
-export function check(steps, records, sha, current = (s) => s === sha, { start = false } = {}) {
+// `records` maps a step id to its record; `current(recordSha, step)` says whether a record's commit
+// counts for the candidate (exact match, or the PR gate's rule, prCurrent).
+export function check(steps, records, sha, current = (s) => s === sha) {
   const problems = [];
   for (const s of steps) {
-    if (start && s.afterGate) continue;
     const r = records[s.id];
     const who = r?.spawned ? `spawned session ${r.by}` : '';
     if (!r) problems.push(`${s.id}: missing`);
     else if (!STATUS.includes(r.status)) problems.push(`${s.id}: unknown status ${r.status}`);
-    else if (!r.sha || !current(r.sha)) problems.push(`${s.id}: recorded for ${String(r.sha).slice(0, 12)}, not the candidate ${sha.slice(0, 12)}`);
+    else if (!r.sha || !current(r.sha, s)) problems.push(`${s.id}: recorded for ${String(r.sha).slice(0, 12)}, not the candidate ${sha.slice(0, 12)}`);
     else if (r.status === 'fail') problems.push(`${s.id}: FAIL${r.reason ? ` (${r.reason})` : ''}`);
     else if (r.status === 'na' && !r.reason?.trim()) problems.push(`${s.id}: N/A without a reason`);
     else if (r.status === 'na' && who) problems.push(`${s.id}: N/A recorded by ${who}; only the lead may`);
@@ -209,24 +232,47 @@ function questionFile(g, s, sha) {
 
 // The PR gate's rule: a record made at `sha` holds for head `head` when sha is the head, or an
 // ancestor of it and every commit between them on the first-parent line is a merge of a commit
-// already on main (`gh pr update-branch`). A commit missing locally is an error: fetch first.
-export function prCurrent(repo, head, main = mainRef(repo)) {
+// already on main (`gh pr update-branch`, or main merged by hand) with no hand-resolved line: its
+// `git show --remerge-diff` prints nothing. A command step with `if <key>` (with `conf`) also holds
+// when the PR's own change between touches no path of paths.<key>: the files of the non-merge commits
+// on the first-parent line, a merge of main's remerge-diff files, and every file another merge brings.
+// A checks record holds only at its own commit. A commit missing locally is an error: fetch first.
+export function prCurrent(repo, head, { main = mainRef(repo), conf = null } = {}) {
   const memo = new Map();
+  const remerge = new Map();
   const isAncestor = (a, b) => {
     const s = exec('git', ['-C', repo, 'merge-base', '--is-ancestor', a, b], { ok: true }).status;
     if (s > 1) die(`${a.slice(0, 12)} or ${b} is not in ${repo}; fetch first`);
     return s === 0;
   };
-  return (sha) => {
-    if (sha === head) return true;
+  const resolved = (c) => {
+    if (!remerge.has(c)) remerge.set(c, git(repo, 'show', '--remerge-diff', '--format=', '--name-only', c).split('\n').filter(Boolean));
+    return remerge.get(c);
+  };
+  const ofMain = ({ parents }) => parents.length === 2 && isAncestor(parents[1], main);
+  // The commits between, { commit, parents }, or null when sha is not an ancestor of the head.
+  const between = (sha) => {
     if (!memo.has(sha)) {
-      const between = isAncestor(sha, head) ? git(repo, 'rev-list', '--first-parent', '--parents', `${sha}..${head}`).split('\n').filter(Boolean) : null;
-      memo.set(sha, Boolean(between) && between.every((l) => {
-        const [, , merged, ...more] = l.split(' ');
-        return merged && !more.length && isAncestor(merged, main);
-      }));
+      memo.set(sha, isAncestor(sha, head)
+        ? git(repo, 'rev-list', '--first-parent', '--parents', `${sha}..${head}`).split('\n').filter(Boolean).map((l) => {
+          const [commit, ...parents] = l.split(' ');
+          return { commit, parents };
+        })
+        : null);
     }
     return memo.get(sha);
+  };
+  const ownFiles = (commits) => commits.flatMap((c) =>
+    c.parents.length < 2 ? git(repo, 'diff-tree', '--no-commit-id', '--name-only', '-r', c.commit).split('\n').filter(Boolean)
+    : ofMain(c) ? resolved(c.commit)
+    : git(repo, 'diff', '--name-only', c.parents[0], c.commit).split('\n').filter(Boolean));
+  return (sha, step) => {
+    if (sha === head) return true;
+    if (step?.kind === 'checks') return false;
+    const commits = between(sha);
+    if (!commits) return false;
+    if (commits.every((c) => ofMain(c) && !resolved(c.commit).length)) return true;
+    return Boolean(conf && step?.kind === 'command' && step.if) && !matchesPaths(conf, step.if, ownFiles(commits));
   };
 }
 
@@ -272,7 +318,7 @@ function candidateOf(g, flags) {
   if (!sha) die(`no candidate yet for this gate: lc-gate run it, or pass --candidate`);
   return sha;
 }
-const currentFor = (g, gate, sha) => (gate === 'pr' ? prCurrent(g.cfg.repo, sha) : (s) => s === sha);
+const currentFor = (g, gate, sha) => (gate === 'pr' ? prCurrent(g.cfg.repo, sha, { conf: g.cfg.conf }) : (s) => s === sha);
 
 // --- commands ----------------------------------------------------------------------------------
 
@@ -313,9 +359,11 @@ function record(repo, [gate, id, step, status, planStatus], flags) {
     if (status !== 'pass') return;
     const rerun = `lc-gate run ${gate} ${id} --rerun ${step}`;
     if (s.kind === 'command') die(`${step} is a command step: only the runner records its pass, from its exit at the candidate. ${rerun} runs it`);
+    if (s.kind === 'checks') die(`${step} is a checks step: only the runner records its pass, from the host's check runs on the candidate. ${rerun} reads them`);
     if (s.kind === 'session' && !own && !flags.carry) die(`${step} is a session step: its pass is recorded only by the session lc-gate run starts for it (${rerun}); the lead records N/A with --reason, or carries an earlier pass with --carry --reason`);
   };
   if (flags.carry) {
+    if (s.kind === 'checks') die(`${step} is a checks step: its record holds only for the commit the checks ran on, never by carry; lc-gate run ${gate} ${id} reads them for the candidate`);
     if (!old) die(`nothing to carry: ${step} has no record`);
     if (old.sha === sha) die(`${step} is already recorded for the candidate`);
     if (old.status === 'fail') die(`${step} is FAIL at ${old.sha.slice(0, 12)}: only a pass or N/A is carried; rerun the step`);
@@ -341,6 +389,14 @@ function record(repo, [gate, id, step, status, planStatus], flags) {
   if (!g.state.candidate) writeJson(join(g.dir, 'gate.json'), { gate, id, candidate: sha });
   writeJson(join(g.dir, 'records', `${step}.json`), rec);
   console.log(`recorded ${gate} ${id} ${step}: ${status}${rec.carried ? ' (carried)' : ''} for ${sha.slice(0, 12)}`);
+  // An owner step the lead set aside: the owner reads it afterwards. The board's page doesn't show
+  // this list yet; it is <data_dir>/read-afterwards.jsonl.
+  if (s.kind === 'owner' && status === 'na') {
+    const list = join(g.cfg.dataDir, 'read-afterwards.jsonl');
+    mkdirSync(dirname(list), { recursive: true });
+    appendFileSync(list, JSON.stringify({ gate, id, step, commit: sha, reason, by: rec.by, at: rec.at }) + '\n');
+    console.log(`listed for the owner to read afterwards: ${list}`);
+  }
   // The session's work is done: its window closes after LC_CLOSE_DELAY seconds (10), so this command's
   // output still reaches it.
   if (own && process.env.LC_SESSION) {
@@ -403,16 +459,15 @@ function status(repo, [gate, id], flags) {
     return 1;
   }
   if (flags.trailer) {
-    const steps = g.steps.map((s) => `${s.id}=${g.records[s.id].status}${g.records[s.id].carried ? '(carried)' : ''}`);
-    console.log(`Verified-By: lc-gate ${gate} ${id} ${sha} ${steps.join(' ')}`);
+    console.log(trailer(gate, id, sha, g.steps, g.records));
     return 0;
   }
   if (flags.write) return writeRecord(g, gate, id, sha);
   const rows = [['step', 'kind', 'status', 'commit', 'by', 'evidence / reason']];
   for (const s of g.steps) {
     const r = g.records[s.id];
-    const stale = r && !current(r.sha) ? ' (stale)' : '';
-    rows.push([s.id, s.afterGate ? `${s.kind} after-gate` : s.kind, label(r) + stale, r ? r.sha.slice(0, 12) : '', r?.by ?? '', [r?.evidence, r?.reason].filter(Boolean).join(' · ')]);
+    const stale = r && !current(r.sha, s) ? ' (stale)' : '';
+    rows.push([s.id, s.kind, label(r) + stale, r ? r.sha.slice(0, 12) : '', r?.by ?? '', [r?.evidence, r?.reason].filter(Boolean).join(' · ')]);
     const p = s.plan ? g.records[`${s.id}.plan`] : null;
     if (s.plan) rows.push([`${s.id} (plan)`, '', p ? `${label(p)} at base` : '-', p ? p.sha.slice(0, 12) : '', p?.by ?? '', [p?.evidence, p?.reason].filter(Boolean).join(' · ')]);
   }
@@ -425,16 +480,12 @@ function status(repo, [gate, id], flags) {
 function checkGate(repo, [gate, id], flags) {
   const g = load(repo, gate, id);
   const sha = candidateOf(g, flags);
-  // The check before the review pipeline starts: the after-gate steps come after it (status and the
-  // merge require them).
-  const current = currentFor(g, gate, sha);
-  const problems = check(g.steps, g.records, sha, current, { start: true });
+  const problems = check(g.steps, g.records, sha, currentFor(g, gate, sha));
   if (problems.length) {
     console.error(`lc-gate: ${gate} ${id} at ${sha.slice(0, 12)} does not hold:\n  ${problems.join('\n  ')}`);
     return 1;
   }
-  const after = check(g.steps, g.records, sha, current);
-  console.log(`${gate} ${id} holds at ${sha}${after.length ? `, up to the review pipeline; after it, the merge also needs:\n  ${after.join('\n  ')}` : ''}`);
+  console.log(`${gate} ${id} holds at ${sha}`);
   return 0;
 }
 
@@ -457,8 +508,12 @@ async function run(repo, [gate, idArg], flags) {
   const sha = flags.candidate ? verify(repo, flags.candidate) : gate === 'phase' && g.state.candidate ? g.state.candidate : verify(repo, 'HEAD');
   const base = flags.base ? verify(repo, flags.base) : gate === 'pr' ? git(repo, 'merge-base', mainRef(repo), sha) : g.state.base;
   if (!base) die(`the phase gate's first run needs --base <main before the phase's first merge>`);
+  const current = currentFor(g, gate, sha);
   if (g.state.candidate && g.state.candidate !== sha) {
-    console.log(`new candidate ${sha.slice(0, 12)} (was ${g.state.candidate.slice(0, 12)}): its records are stale; each step reruns, or the lead carries it with lc-gate record … --carry --reason`);
+    const had = g.steps.filter((s) => g.records[s.id]);
+    const holds = had.filter((s) => current(g.records[s.id].sha, s)).map((s) => s.id);
+    const not = had.filter((s) => !holds.includes(s.id)).map((s) => s.id);
+    console.log(`new candidate ${sha.slice(0, 12)} (was ${g.state.candidate.slice(0, 12)}): ${holds.length ? `records that hold: ${holds.join(', ')}` : 'no record holds'}; ${not.length ? `that do not: ${not.join(', ')} (each reruns, or the lead carries it with lc-gate record … --carry --reason)` : 'none that does not'}`);
   }
   writeJson(join(g.dir, 'gate.json'), { gate, id, candidate: sha, base });
   // The evidence folder's git-only part, whatever the freeze step does (templates/phase-review.md).
@@ -467,7 +522,6 @@ async function run(repo, [gate, idArg], flags) {
   writeFileSync(join(evidence, 'prs.txt'), exec('git', ['-C', repo, 'log', '--first-parent', '--merges', '--format=%h %s', `${base}..${sha}`]).stdout);
   writeFileSync(join(evidence, 'files.txt'), exec('git', ['-C', repo, 'diff', '--name-only', base, sha]).stdout);
   const ctx = { ...g, repo, gate, id, sha, base };
-  const current = currentFor(g, gate, sha);
   let diff;
   const touches = (key) => {
     diff ??= git(repo, 'diff', '--name-only', base, sha).split('\n').filter(Boolean);
@@ -486,10 +540,10 @@ async function run(repo, [gate, idArg], flags) {
   const parallel = Number(g.cfg.conf['sessions.gate_parallel']) || 0;
   if (g.cfg.conf['sessions.gate_parallel'] && !(Number.isInteger(parallel) && parallel > 0)) die(`sessions.gate_parallel is "${g.cfg.conf['sessions.gate_parallel']}": a whole number above 0, or unset`);
   ctx.parallel = parallel;
-  ctx.running = parallel ? g.steps.filter((s) => s.kind === 'session' && !(g.records[s.id] && current(g.records[s.id].sha)) && liveWindow(g.cfg, sessionName(ctx, s))).length : 0;
-  // The after-gate steps last: they come after the review pipeline, which starts once the rest holds.
-  for (const s of [...g.steps.filter((x) => !x.afterGate), ...g.steps.filter((x) => x.afterGate)]) {
-    let r = g.records[s.id] && current(g.records[s.id].sha) && !rerun.has(s.id) ? g.records[s.id] : null;
+  ctx.running = parallel ? g.steps.filter((s) => s.kind === 'session' && !(g.records[s.id] && current(g.records[s.id].sha, s)) && liveWindow(g.cfg, sessionName(ctx, s))).length : 0;
+  const held = {}; // this walk's record that holds, per step above
+  for (const s of g.steps) {
+    let r = g.records[s.id] && current(g.records[s.id].sha, s) && !rerun.has(s.id) ? g.records[s.id] : null;
     const old = g.records[s.id];
     if (s.plan && !g.records[`${s.id}.plan`] && r?.status !== 'na' && !(s.if && !touches(s.if))) {
       commits ??= Number(git(repo, 'rev-list', '--count', `${base}..${sha}`));
@@ -497,18 +551,19 @@ async function run(repo, [gate, idArg], flags) {
         ? `no plan recorded before the work, and the work has ${commits} commit(s) already: the lead records lc-gate record ${gate} ${id} ${s.id} plan na --reason …`
         : `plan now, before the first commit: from the project's chosen tools and their docs, one line per piece of work, "I will call <function> (<docs page>) for <what>"; then lc-gate record ${gate} ${id} ${s.id} plan --evidence <file>`);
     }
-    const waits = (s.afterGate || ['command', 'here', 'owner'].includes(s.kind)) && !above;
-    if (s.afterGate && !r) say(ctx, s, 'after the pipeline: start the review pipeline once the steps above hold; its result for this head is what this step records');
+    // `after`: each named step's record holds with PASS or N/A; else today's rule, every step above recorded.
+    const pending = s.after?.filter((x) => !['pass', 'na'].includes(held[x]?.status)) ?? [];
+    const waits = s.after ? pending.length > 0 : ['command', 'here', 'owner'].includes(s.kind) && !above;
     if (rerun.has(s.id) && s.kind === 'session') rmSync(join(g.dir, 'briefs', `${s.id}-${sha.slice(0, 12)}.md`), { force: true });
     if (r && s.kind === 'session' && liveWindow(g.cfg, sessionName(ctx, s))) {
       closeWindow(g.cfg, sessionName(ctx, s));
       say(ctx, s, `${label(r)}, by ${r.by}; closed its window ${sessionName(ctx, s)}`);
-    } else if (r && !(s.kind === 'command' && r.status === 'fail' && !waits)) say(ctx, s, `${label(r)}, by ${r.by}${r.reason ? ` (${r.reason})` : ''}`);
+    } else if (r && !(['command', 'checks'].includes(s.kind) && r.status === 'fail' && !waits)) say(ctx, s, `${label(r)}, by ${r.by}${r.reason ? ` (${r.reason})` : ''}`);
     else if (!r && s.if && !touches(s.if)) r = put(ctx, s, 'na', '', `no file changed between ${base.slice(0, 12)} and ${sha.slice(0, 12)} matches paths.${s.if}`, 'lc-gate');
-    else if (s.kind === 'session' && old && !rerun.has(s.id)) {
+    else if (s.kind === 'session' && old && !rerun.has(s.id) && !waits) {
       say(ctx, s, `stale: ${label(old)} for ${old.sha.slice(0, 12)}. Rerun it with lc-gate run ${gate} ${id} --rerun ${s.id}, or carry it with lc-gate record ${gate} ${id} ${s.id} pass --carry --reason …`);
     }
-    else if (waits) say(ctx, s, r ? `${label(r)}; reruns once the steps above have records` : 'waits until every step above has a record');
+    else if (waits) say(ctx, s, s.after ? `${r ? `${label(r)}; reruns once` : 'waits until'} ${pending.join(', ')} ${pending.length > 1 ? 'pass or are' : 'passes or is'} N/A` : r ? `${label(r)}; reruns once the steps above have records` : 'waits until every step above has a record');
     else {
       try {
         r = (await STEP[s.kind](ctx, s)) ?? r;
@@ -517,14 +572,12 @@ async function run(repo, [gate, idArg], flags) {
         say(ctx, s, `not started: ${err.message}`);
       }
     }
+    if (r) held[s.id] = r;
     above &&= Boolean(r);
   }
-  const now = readRecords(g.dir);
-  const problems = check(g.steps, now, sha, current);
-  const before = check(g.steps, now, sha, current, { start: true });
+  const problems = check(g.steps, readRecords(g.dir), sha, current);
   console.log(
-    !problems.length ? `every step holds: lc-gate status ${gate} ${id}${gate === 'phase' ? ' --write' : ' --trailer'}`
-    : !before.length ? `every step before the review pipeline holds: start it, then rerun lc-gate run for the after-gate step(s)`
+    !problems.length ? `every step holds: ${gate === 'phase' ? `lc-gate status phase ${id} --write` : `lc-gate merge pr ${id}`}`
     : `${problems.length} step(s) not done; rerun lc-gate run to advance`,
   );
   return 0;
@@ -695,12 +748,15 @@ const STEP = {
     const kept = join(ctx.dir, 'findings', `${s.id}.before-${ctx.sha.slice(0, 12)}.md`);
     if (existsSync(findings)) renameSync(findings, kept);
     let scope = 'a full review of the whole diff, as deep as the review skill asks.';
+    // A follow-up review reads only the PR's own change since: its commits and the hand-resolved lines
+    // of any merge, nothing main brought in (git 2.36 for --remerge-diff).
+    const own = (from) => `the PR's own change since is \`git log -p --first-parent --remerge-diff ${from}..${ctx.sha}\`: its commits and the hand-resolved lines of any merge, nothing main brought in`;
     if (earlier) {
       const was = earlier.evidence === findings ? kept : earlier.evidence;
-      scope = `a review after a fix. The step failed at \`${earlier.sha.slice(0, 12)}\` with the findings in \`${was}\`; the fix is \`git diff ${earlier.sha} ${ctx.sha}\`. Check that each of its P1 and P2 is resolved at the candidate and that the fix's own lines add none; raise nothing else, unless a P1 or P2 with its evidence.`;
+      scope = `a review after a fix. The step failed at \`${earlier.sha.slice(0, 12)}\` with the findings in \`${was}\`; ${own(earlier.sha)}. Check that each of its P1 and P2 is resolved at the candidate and that those lines add none; raise nothing else, unless a P1 or P2 with its evidence.`;
     }
     // Commits on top of a pass: only they are reviewed.
-    if (before?.status === 'pass') scope = `a review of the change since a pass. The step passed at \`${before.sha.slice(0, 12)}\`; the change since is \`git diff ${before.sha} ${ctx.sha}\`. Review those lines as deep as the review skill asks; raise nothing in the rest, unless a P1 or P2 with its evidence.`;
+    if (before?.status === 'pass') scope = `a review of the change since a pass. The step passed at \`${before.sha.slice(0, 12)}\`; ${own(before.sha)}. Review those lines as deep as the review skill asks; raise nothing in the rest, unless a P1 or P2 with its evidence.`;
     writeJson(roundsFile, { ...rounds, [s.id]: { ...rounds[s.id], [ctx.sha]: round } });
     const spec = ctx.gate !== 'pr' ? 'The spec: the inputs the question file names.'
       : ((b) => (b ? `The PR's brief: \`${b}\`; judge the change against it.` : "The PR's brief: none known; judge the change against the PR body."))(prBrief(ctx));
@@ -726,6 +782,12 @@ const STEP = {
     return say(ctx, s, `started session ${name} on ${env.LC_MODEL}, effort ${env.LC_EFFORT}; brief ${brief}${said}`);
   },
 
+  // The host's verdict on this exact commit; a check still running or not started yet is waited for.
+  checks(ctx, s) {
+    const r = hostChecks(ctx.cfg, ctx.sha);
+    return r.wait ? say(ctx, s, r.wait) : put(ctx, s, r.status, r.evidence, r.reason, 'lc-gate');
+  },
+
   here(ctx, s) {
     return say(ctx, s, `yours: ${s.arg}. Then lc-gate record ${ctx.gate} ${ctx.id} ${s.id} pass|fail --evidence <file>`);
   },
@@ -747,6 +809,38 @@ const STEP = {
     return put(ctx, s, accepted ? 'pass' : 'fail', `board answer ${qid}`, answer.text?.trim() || (accepted ? '' : 'not accepted'), 'owner');
   },
 };
+
+// The newest check run of each name in ci.required_checks on commit `sha` (the host's API, every page):
+// { status: pass|fail, evidence: the commit's checks URL, reason } once the verdict is in, else { wait }.
+// Success, neutral and skipped pass; any other conclusion fails, even while another check runs.
+export function hostChecks(cfg, sha) {
+  const names = (cfg.conf['ci.required_checks'] ?? '').split(/[\s,]+/).filter(Boolean);
+  if (!names.length) die('a checks step reads ci.required_checks: set the check names the default branch requires');
+  const out = exec('gh', ['api', '--paginate', `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`, '--jq', '.check_runs[] | {name, status, conclusion, started_at, id, html_url} | @json'], { cwd: cfg.repo, timeout: GH_TIMEOUT });
+  const runs = out.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const newest = new Map();
+  for (const run of runs) {
+    const had = newest.get(run.name);
+    if (!had || String(run.started_at ?? '') > String(had.started_at ?? '') || (run.started_at === had.started_at && run.id > had.id)) newest.set(run.name, run);
+  }
+  const short = sha.slice(0, 12);
+  const failed = names.filter((n) => newest.get(n)?.status === 'completed' && !['success', 'neutral', 'skipped'].includes(newest.get(n).conclusion));
+  if (failed.length) return { status: 'fail', evidence: checksUrl(cfg, sha, runs), reason: `${failed.map((n) => `${n} ${newest.get(n).conclusion}`).join(', ')} on ${short}` };
+  const missing = names.filter((n) => !newest.has(n));
+  const running = names.filter((n) => newest.has(n) && newest.get(n).status !== 'completed');
+  if (missing.length || running.length) {
+    const none = !runs.length ? `: no check run on ${short} at all; is the head pushed?` : '';
+    return { wait: `waits for the checks on ${short}: ${[running.length && `running: ${running.join(', ')}`, missing.length && `not started: ${missing.join(', ')}`].filter(Boolean).join('; ')}${none}` };
+  }
+  return { status: 'pass', evidence: checksUrl(cfg, sha, runs), reason: '' };
+}
+
+// The commit's checks page: from a check run's URL (https://<host>/<owner>/<repo>/runs/<id>), else the host.
+function checksUrl(cfg, sha, runs) {
+  const base = runs.map((r) => String(r.html_url ?? '').match(/^(https?:\/\/[^/]+\/[^/]+\/[^/]+)\//)?.[1]).find(Boolean)
+    ?? exec('gh', ['repo', 'view', '--json', 'url', '--jq', '.url'], { cwd: cfg.repo, timeout: GH_TIMEOUT }).stdout.trim();
+  return `${base}/commit/${sha}/checks`;
+}
 
 // --- the phase record --------------------------------------------------------------------------
 
@@ -1212,8 +1306,8 @@ export function ghMerge(words) {
   return { target, repo };
 }
 
-// PreToolUse on Bash (hooks/hooks.json filters to the gate start and the merge). Reads the hook's
-// JSON on stdin and checks every gate start and every `gh pr merge` in the command line, each from
+// PreToolUse on Bash (hooks/hooks.json filters to the merge and the commit). Reads the hook's
+// JSON on stdin and checks every `gh pr merge` and `git merge` in the command line, each from
 // the directory a `cd` before it left. Per repository: nothing without gate_pr or with gate_pr_mode
 // off; observe (the default) logs to <gates>/observe.log and tells the session what enforce would
 // refuse; enforce exits 2 with the missing steps. Its own errors, a config error or a PR it can't
@@ -1239,7 +1333,6 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
     for (const cmd of shellCommands(String(input?.tool_input?.command ?? ''))) {
       const w = cmd.slice(cmd.findIndex((x) => !/^[A-Za-z_]\w*=/.test(x.text)));
       if (w[0]?.text === 'cd' && w[1] && !w[1].dynamic) cwd = resolve(cwd, w[1].text.replace(/^~(?=\/|$)/, homedir()));
-      else if (w[0]?.text === 'no-mistakes' && w[1]?.text === 'axi' && w[2]?.text === 'run') points.push({ point: 'gate start', cwd });
       else if (ghMerge(w)) points.push({ point: 'merge', cwd, ...ghMerge(w) });
       else if (gitMerge(w, cwd)) for (const target of gitMerge(w, cwd).targets) points.push({ point: 'merge', cwd: gitMerge(w, cwd).cwd, local: target });
       else if (gitCommit(w, cwd)) plans.push({ point: 'commit', ...gitCommit(w, cwd) });
@@ -1307,25 +1400,20 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
         branch = local ? t : t.replace(/^[^/]+\//, '');
         if (branch === into) continue; // the default branch's own remote copy
         head = git(repo, 'rev-parse', `${local ? 'refs/heads' : 'refs/remotes'}/${t}^{commit}`);
-      } else if (p.point === 'merge') {
+      } else {
         if (p.target?.dynamic) die(`can't tell which PR \`gh pr merge ${p.target.text}\` merges: the shell expands it`);
         const view = exec('gh', ['pr', 'view', ...(p.target ? [p.target.text] : []), ...p.repo, '--json', 'headRefName,headRefOid'], { cwd: p.cwd, timeout: GH_TIMEOUT });
         ({ headRefName: branch, headRefOid: head } = JSON.parse(view.stdout));
         // The PR's head and main as the remote has them (an update-branch happens on the remote).
-        if (exec('git', ['-C', repo, 'remote', 'get-url', 'origin'], { ok: true }).status === 0) exec('git', ['-C', repo, 'fetch', '-q', 'origin'], { timeout: GH_TIMEOUT });
-      } else {
-        [branch, head] = [git(p.cwd, 'rev-parse', '--abbrev-ref', 'HEAD'), git(p.cwd, 'rev-parse', 'HEAD')];
+        fetchOrigin(repo);
       }
       const id = branchId(branch);
-      // At the gate start the after-gate steps can't hold yet: the pipeline being started satisfies them.
-      const missing = check(steps, readRecords(gateDir(cfg, 'pr', id)), head, prCurrent(repo, head), { start: p.point === 'gate start' });
+      const missing = check(steps, readRecords(gateDir(cfg, 'pr', id)), head, prCurrent(repo, head, { conf: cfg.conf }));
       // The gate's own record of a merge it let through, complete or not: `observe <n>` counts the
       // complete ones. A merge refused here never happens, so it leaves no mark.
-      if (p.point === 'merge' && (!missing.length || mode !== 'enforce')) {
-        writeJson(join(gateDir(cfg, 'pr', id), 'merged.json'), { branch, head, at: new Date().toISOString(), complete: !missing.length, ...(missing.length ? { missing } : {}) });
-      }
+      if (!missing.length || mode !== 'enforce') markMerged(cfg, id, branch, head, missing);
       if (!missing.length) continue;
-      const what = `the PR gate for ${branch} at ${head.slice(0, 12)} does not hold:\n  ${missing.join('\n  ')}\nRun lc-gate run pr ${id}, then record each step.`;
+      const what = `the PR gate for ${branch} at ${head.slice(0, 12)} does not hold:\n  ${missing.join('\n  ')}\nRun lc-gate run pr ${id} until it holds, then lc-gate merge pr ${id}.`;
       note({ mode, branch, head, missing, ...(mode === 'enforce' ? { refused: true } : {}) });
       if (mode === 'enforce') refused.push(what);
       else told.push(`lc-gate (observe mode): this ${p.point} went ahead, but enforce mode would have refused it: ${what}`);
@@ -1343,6 +1431,118 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
     return 2;
   }
   if (told.length) console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: told.join('\n') } }));
+  return 0;
+}
+
+// --- merge -------------------------------------------------------------------------------------
+
+function fetchOrigin(repo) {
+  if (exec('git', ['-C', repo, 'remote', 'get-url', 'origin'], { ok: true }).status === 0) exec('git', ['-C', repo, 'fetch', '-q', 'origin'], { timeout: GH_TIMEOUT });
+}
+
+// The gate's own mark of a merge it let through, complete or not: `observe <n>` counts the complete ones.
+function markMerged(cfg, id, branch, head, missing) {
+  writeJson(join(gateDir(cfg, 'pr', id), 'merged.json'), { branch, head, at: new Date().toISOString(), complete: !missing.length, ...(missing.length ? { missing } : {}) });
+}
+
+// The Verified-By trailer: each step's status (a step with no record: missing).
+const trailer = (gate, id, sha, steps, records) =>
+  `Verified-By: lc-gate ${gate} ${id} ${sha} ${steps.map((s) => `${s.id}=${records[s.id] ? `${records[s.id].status}${records[s.id].carried ? '(carried)' : ''}` : 'missing'}`).join(' ')}`;
+
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+// `lc-gate merge pr [branch]`: the one way a PR merges, one at a time (<gates>/merge.lock, with its
+// holder and time; a held lock is refused). A branch behind its base is updated on the host first (a
+// conflict stops it: the implementer merges main by hand, and the gate reviews the resolved lines).
+// Then the gate's checks step is read on the head until the host's verdict is in (LC_GATE_MERGE_WAIT
+// seconds, 1800; every LC_GATE_MERGE_POLL, 15), every record must hold there as the merge hook checks
+// it, and gh merges exactly that head with the Verified-By trailer: never --admin, --auto, or a branch
+// deleted. gate_pr_mode off or observe: as the hook in that mode.
+async function merge(repo, [gate, branchArg]) {
+  if (gate !== 'pr') die('usage: lc-gate merge pr [branch]');
+  const cfg = loadConfig(repo);
+  const steps = parseSteps(cfg.conf, 'pr');
+  if (!steps.length) die(`no gate_pr: block in ${join(cfg.repo, '.agents/project.yaml')}`);
+  const modeState = gateMode(cfg, 'gate_pr_mode');
+  const branch = branchArg ?? git(repo, 'rev-parse', '--abbrev-ref', 'HEAD');
+  const lock = join(gatesRoot(cfg), 'merge.lock');
+  mkdirSync(dirname(lock), { recursive: true });
+  try {
+    writeFileSync(lock, JSON.stringify({ holder: process.env.LC_SESSION || 'lead', branch, pid: process.pid, at: new Date().toISOString() }) + '\n', { flag: 'wx' });
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+    let h = {};
+    try {
+      h = readJson(lock, {});
+    } catch {
+      // an unreadable lock is still held
+    }
+    die(`one merge at a time: ${lock} is held by ${h.holder ?? 'an unknown holder'} (merging ${h.branch ?? '?'} since ${h.at ?? '?'}, pid ${h.pid ?? '?'}); wait for it, or remove the file once that merge is gone`);
+  }
+  try {
+    const said = announce(cfg, modeState);
+    if (said) console.log(said);
+    return await mergeLocked(repo, cfg, steps, modeState.mode, branch);
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+
+async function mergeLocked(repo, cfg, steps, mode, branch) {
+  const view = () => JSON.parse(exec('gh', ['pr', 'view', branch, '--json', 'number,headRefOid,headRefName,baseRefName,mergeStateStatus'], { cwd: repo, timeout: GH_TIMEOUT }).stdout);
+  let pr = view();
+  const id = branchId(pr.headRefName);
+  const byHand = `The implementer merges ${pr.baseRefName} into ${pr.headRefName} by hand (git merge, never a rebase) and pushes; the gate then reviews the hand-resolved lines (lc-gate run pr ${id}). Then lc-gate merge pr ${id} again.`;
+  fetchOrigin(repo);
+  if (pr.mergeStateStatus === 'DIRTY') die(`${pr.headRefName} conflicts with ${pr.baseRefName}; nothing merged. ${byHand}`);
+  // Behind: as the host says, or as origin's copy of the base shows (the host says BEHIND only when
+  // its protection asks for an up-to-date branch).
+  const base = `refs/remotes/origin/${pr.baseRefName}`;
+  const known = exec('git', ['-C', repo, 'rev-parse', '--verify', '-q', base], { ok: true }).status === 0 && exec('git', ['-C', repo, 'cat-file', '-e', `${pr.headRefOid}^{commit}`], { ok: true }).status === 0;
+  if (pr.mergeStateStatus === 'BEHIND' || (known && exec('git', ['-C', repo, 'merge-base', '--is-ancestor', base, pr.headRefOid], { ok: true }).status === 1)) {
+    const u = exec('gh', ['pr', 'update-branch', String(pr.number)], { cwd: repo, timeout: GH_TIMEOUT, ok: true });
+    if (u.status) die(`GitHub would not update ${pr.headRefName} from ${pr.baseRefName} (${u.stderr.trim().split('\n').at(-1) ?? ''}); nothing merged. ${byHand}`);
+    const was = pr.headRefOid;
+    for (let i = 0; i < 10 && pr.headRefOid === was; i++) {
+      if (i) await sleep(3000);
+      pr = view();
+    }
+    if (pr.headRefOid === was) die(`updated ${pr.headRefName}, but the host still shows head ${was.slice(0, 12)}; run lc-gate merge pr ${id} again`);
+    console.log(`updated ${pr.headRefName} from ${pr.baseRefName}: head ${pr.headRefOid.slice(0, 12)}`);
+    fetchOrigin(repo);
+  }
+  const head = pr.headRefOid;
+  const dir = gateDir(cfg, 'pr', id);
+  // The checks step at this head: the host's verdict, waited for, is its record.
+  const cs = steps.find((s) => s.kind === 'checks');
+  if (cs) {
+    const wait = Number(process.env.LC_GATE_MERGE_WAIT || 1800);
+    const until = Date.now() + wait * 1000;
+    let r = hostChecks(cfg, head);
+    while (r.wait && Date.now() < until) {
+      await sleep(Math.min(Number(process.env.LC_GATE_MERGE_POLL || 15) * 1000, until - Date.now()));
+      r = hostChecks(cfg, head);
+    }
+    if (r.wait) die(`${cs.id} ${r.wait}, still after ${wait}s (LC_GATE_MERGE_WAIT); nothing merged`);
+    writeJson(join(dir, 'records', `${cs.id}.json`), { step: cs.id, status: r.status, sha: head, evidence: r.evidence, by: 'lc-gate', at: new Date().toISOString(), reason: r.reason });
+    if (r.status === 'fail') die(`${cs.id}: FAIL (${r.reason}); nothing merged. ${r.evidence}`);
+    console.log(`${cs.id}: PASS at ${head.slice(0, 12)}`);
+  }
+  const records = readRecords(dir);
+  if (mode !== 'off') {
+    const missing = check(steps, records, head, prCurrent(repo, head, { conf: cfg.conf }));
+    if (missing.length) {
+      const what = `the PR gate for ${pr.headRefName} at ${head.slice(0, 12)} does not hold:\n  ${missing.join('\n  ')}`;
+      const log = join(gatesRoot(cfg), 'observe.log');
+      appendFileSync(log, JSON.stringify({ at: new Date().toISOString(), point: 'merge', session: process.env.LC_SESSION || '', mode, branch: pr.headRefName, head, missing, ...(mode === 'enforce' ? { refused: true } : {}) }) + '\n');
+      if (mode === 'enforce') die(`${what}\nRun lc-gate run pr ${id} until it holds; nothing merged`);
+      console.log(`lc-gate (observe mode): this merge goes ahead, but enforce mode would refuse it: ${what}`);
+    }
+    markMerged(cfg, id, pr.headRefName, head, missing);
+  }
+  const body = trailer('pr', id, head, steps, records);
+  exec('gh', ['pr', 'merge', String(pr.number), '--merge', '--match-head-commit', head, '--body', body], { cwd: repo, timeout: GH_TIMEOUT });
+  console.log(`merged #${pr.number} (${pr.headRefName}) at ${head}\n${body}`);
   return 0;
 }
 
@@ -1374,8 +1574,8 @@ export async function main(argv, cwd = process.cwd()) {
   const [cmd, ...rest] = argv;
   const repo = exec('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { ok: true }).stdout.trim() || cwd;
   const { pos, flags } = parseArgs(rest);
-  const commands = { run, record, status, hook, enforcement, protect, questions: (r, p) => listQuestions(p[0], cwd), 'plan-check': (r, p, f) => planCheck(r, p, f, cwd), check: (r, p, f) => (f.diff ? checkPhaseDiff(r, f.diff, p[1]) : checkGate(r, p, f)) };
-  if (!commands[cmd]) die(`usage: lc-gate run|record|status|check|questions|plan-check|hook|enforcement|protect …; see the top of gate/gate.mjs`);
+  const commands = { run, record, status, hook, merge, enforcement, protect, questions: (r, p) => listQuestions(p[0], cwd), 'plan-check': (r, p, f) => planCheck(r, p, f, cwd), check: (r, p, f) => (f.diff ? checkPhaseDiff(r, f.diff, p[1]) : checkGate(r, p, f)) };
+  if (!commands[cmd]) die(`usage: lc-gate run|record|status|check|merge|questions|plan-check|hook|enforcement|protect …; see the top of gate/gate.mjs`);
   return (await commands[cmd](repo, pos, flags)) ?? 0;
 }
 

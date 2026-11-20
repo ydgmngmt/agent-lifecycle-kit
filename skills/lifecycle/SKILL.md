@@ -20,12 +20,13 @@ A fix found at any gate loops back to implementation and is retested.
 
 ## Gates
 
-`gate_pr:` and `gate_phase:` in the project file declare each gate's steps, one line each (`<step>: <kind> <argument> [if <paths key>]`); the order lives there only. `lc-gate` walks the list; each step leaves a record (PASS, FAIL, or N/A with a reason) bound to the candidate commit, and `lc-gate check` refuses while one is missing, stale or failed.
+`gate_pr:` and `gate_phase:` in the project file declare each gate's steps, one line each (`<step>: <kind> <argument> [if <paths key>] [after <step>]`); the order lives there only. `lc-gate` walks the list; each step leaves a record (PASS, FAIL, or N/A with a reason) bound to the candidate commit, and `lc-gate check` refuses while one is missing, stale or failed.
 
 | Kind | Who does it |
 | --- | --- |
 | `command` | the runner runs it and records its exit |
 | `workflow` | the runner starts the CI workflow and records the run |
+| `checks` | the runner reads the host's required checks on the exact commit |
 | `session` | the runner spawns a session (`review`) on `sessions.gate_model`; it records its own step |
 | `here` | the session running the gate |
 | `owner` | a board question; the owner's answer is the record |
@@ -34,6 +35,14 @@ A fix found at any gate loops back to implementation and is retested.
 - `lc-gate status <gate> <id>`: one row per step. Read it before saying anything about a gate.
 - `gate_pr_mode`, `gate_pr_plan` (`off`, `observe`, `observe <n>`, `enforce`): whether a missing PR record or plan warns or refuses; `observe <n>` enforces once n PRs merged with every record.
 - `lc-gate enforcement`: what refuses without each step, and whether each layer is on. Read it before calling a gate binding.
+- `lc-gate merge pr <branch>`: the one way a PR merges, one at a time.
+
+Terms:
+
+- **Full review:** the first review of a PR.
+- **Follow-up review:** any later one, scoped to the PR's own change since.
+- **Holds:** a record still counts for a new head by rule (a clean merge of main; a command's `if` paths untouched).
+- **Carry:** the lead's manual act of keeping a record for a new head, with a reason.
 
 ## Roles
 

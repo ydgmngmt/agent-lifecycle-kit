@@ -1,16 +1,10 @@
 {
-  "description": "The gates' tripwires through lc-gate hook: the PR gate's records at the gate start and at merge, gh pr merge or git merge into the default branch (gate_pr_mode), and the plan before the work on every edit and commit (gate_pr_plan), in .agents/project.yaml.",
+  "description": "The gates' tripwires through lc-gate hook: the PR gate's records at merge, gh pr merge or git merge into the default branch (gate_pr_mode), and the plan before the work on every edit and commit (gate_pr_plan), in .agents/project.yaml.",
   "hooks": {
     "PreToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
-          {
-            "type": "command",
-            "if": "Bash(no-mistakes axi run *)",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/lc-gate\" hook",
-            "timeout": 90
-          },
           {
             "type": "command",
             "if": "Bash(gh pr merge *)",

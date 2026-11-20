@@ -1,6 +1,6 @@
 # Gate step {{gate}}/{{id}}/{{step}}
 
-One job: answer every question in `{{question}}` for `git diff {{base}} {{candidate}}`, with the `review` skill.
+One job: answer every question in `{{question}}` for the change the scope names, with the `review` skill. The whole change is `git diff {{base}} {{candidate}}`.
 
 - Base `{{base}}`; candidate `{{candidate}}`, {{checkout}}.
 - Scope: {{scope}}

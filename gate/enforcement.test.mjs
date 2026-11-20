@@ -11,8 +11,9 @@ import { fileURLToPath } from 'node:url';
 const GATE = fileURLToPath(new URL('./gate.mjs', import.meta.url));
 const KIT = fileURLToPath(new URL('..', import.meta.url));
 
+// This kit's bin first: a commit runs the pre-commit template, which calls lc-gate from PATH.
 const sh = (cwd, cmd) => {
-  const r = spawnSync('bash', ['-c', cmd], { cwd, encoding: 'utf8' });
+  const r = spawnSync('bash', ['-c', cmd], { cwd, encoding: 'utf8', env: { ...process.env, PATH: `${KIT}bin:${process.env.PATH}` } });
   assert.equal(r.status, 0, r.stderr);
   return r.stdout.trim();
 };
@@ -62,7 +63,7 @@ paths:
 gate_pr:
   tool-fit: session docs/review/tool-fit.md if mechanism plan
   reviewer: session docs/review-checklist.md
-  review: command node .agents/ci/pipeline-passed.mjs review after-gate
+  ci: checks
 gate_phase:
   stack: session docs/review/stack-hunt.md
 protected_files: [.agents/project.yaml, .agents/ci/**, .githooks/pre-commit, .github/workflows/**, docs/review/**, docs/review-checklist.md]
@@ -104,14 +105,14 @@ test('enforcement: every layer on, --strict holds', () => {
   for (const re of [/required checks/, /up to date/, /pull requests only/, /administrators included/, /core\.hooksPath/, /Claude Code plugin hook/, /workflow for verify-pr/, /workflow for pr-body/, /base branch's copy/]) {
     assert.match(line(out.stdout, re), /\bon\b/, `${re}: ${line(out.stdout, re)}`);
   }
-  assert.match(line(out.stdout, /^.*\breview\b.*after-gate/), /the review pipeline/);
+  assert.match(line(out.stdout, /gate_pr ci: checks/), /independent record.*the host's check runs on the exact commit.*lc-gate merge.*\bon$/);
   assert.match(line(out.stdout, /tool-fit/), /separate session/);
   assert.match(line(out.stdout, /gate_pr_mode/), /enforce/);
   assert.match(line(out.stdout, /\.agents\/project\.yaml/), /\bon\b/);
 });
 
 test('enforcement: each layer off is named, and --strict exits 1; without --strict, 0', () => {
-  const yaml = YAML.replace('  review: command', '  self-review: here code-review of the diff\n  review: command').replace(/protected_files: .*\n/, 'protected_files: [.agents/project.yaml]\n');
+  const yaml = YAML.replace('  ci: checks', '  self-review: here code-review of the diff\n  ci: checks').replace(/protected_files: .*\n/, 'protected_files: [.agents/project.yaml]\n');
   const r = repoWith(yaml, { layers: false });
   r.gh.set('api.err', 'gh: Branch not protected (HTTP 404)\n');
   const out = r.lc(['enforcement', '--strict']);
@@ -287,7 +288,7 @@ test('a mode that is not off, observe, observe <n> or enforce is an error', () =
   assert.match(r.lc(['enforcement']).stdout + r.lc(['enforcement']).stderr, /gate_pr_mode is "observe two"/);
 });
 
-test('the project template: modes observe 3, no here step in gate_pr, the review step after-gate, the stack hunt its own phase step', async () => {
+test('the project template: modes observe 3, no here step in gate_pr, the review after the checks, the stack hunt its own phase step', async () => {
   const { parseProject } = await import('../board/config.mjs');
   const { parseSteps } = await import('./gate.mjs');
   const conf = parseProject(readFileSync(join(KIT, 'templates/project.yaml'), 'utf8'));
@@ -295,7 +296,10 @@ test('the project template: modes observe 3, no here step in gate_pr, the review
   assert.equal(conf.gate_pr_plan, 'observe 3');
   const pr = parseSteps(conf, 'pr');
   assert.deepEqual(pr.filter((s) => s.kind === 'here'), []);
-  assert.deepEqual(pr.find((s) => s.id === 'review'), { id: 'review', kind: 'command', arg: 'node .agents/ci/pipeline-passed.mjs review', if: null, afterGate: true });
+  assert.deepEqual(pr.find((s) => s.id === 'ci'), { id: 'ci', kind: 'checks', arg: '', if: null });
+  assert.deepEqual(pr.find((s) => s.id === 'live-check').after, ['ci']);
+  assert.deepEqual(pr.map((s) => s.id).slice(-3), ['ci', 'live-check', 'reviewer']);
+  assert.ok(!existsSync(join(KIT, 'templates/ci/pipeline-passed.mjs')));
   assert.equal(pr.find((s) => s.id === 'tool-fit').plan, true);
   assert.equal(parseSteps(conf, 'phase').find((s) => s.id === 'stack').arg, 'docs/review/stack-hunt.md');
   assert.equal(conf['ci.required_checks'], 'verify-pr pr-body');
@@ -307,7 +311,7 @@ test('the project template: the checklist reviews every PR against its brief fir
   const { parseSteps, questions } = await import('./gate.mjs');
   const conf = parseProject(readFileSync(join(KIT, 'templates/project.yaml'), 'utf8'));
   const pr = parseSteps(conf, 'pr');
-  assert.deepEqual(pr.find((s) => s.id === 'reviewer'), { id: 'reviewer', kind: 'session', arg: conf['docs.review_checklist'], if: null });
+  assert.deepEqual(pr.find((s) => s.id === 'reviewer'), { id: 'reviewer', kind: 'session', arg: conf['docs.review_checklist'], if: null, after: ['ci', 'live-check'] });
   assert.deepEqual(pr.filter((s) => /correctness/.test(s.arg)), []);
   const qs = questions(readFileSync(join(KIT, 'templates/review/checklist.md'), 'utf8'));
   assert.match(qs[0], /^\(P2\) Does the diff do everything its brief's "Done when" lines say/);
@@ -315,27 +319,22 @@ test('the project template: the checklist reviews every PR against its brief fir
 });
 
 test('enforcement: the checklist review must run on every PR', () => {
-  const r = repoWith(YAML.replace('  reviewer: session docs/review-checklist.md\n', '  reviewer: session docs/review-checklist.md if mechanism\n').replace(/ {2}review: command .*\n/, ''));
+  const r = repoWith(YAML.replace('  reviewer: session docs/review-checklist.md\n', '  reviewer: session docs/review-checklist.md if mechanism\n'));
   r.gh.set('api.json', FULL(['verify-pr', 'pr-body']));
   let out = r.lc(['enforcement', '--strict']);
   assert.equal(out.status, 1);
-  assert.match(line(out.stdout, /^review\s/), /every PR.*\boff\b.*session docs\/review-checklist\.md.*or after-gate/);
+  assert.match(line(out.stdout, /^review\s/), /every PR.*\boff\b.*session docs\/review-checklist\.md`$/);
   writeFileSync(join(r.repo, '.agents/project.yaml'), YAML.replaceAll('$STATE', `${r.repo}/state`));
   out = r.lc(['enforcement', '--strict']);
   assert.equal(out.status, 0, out.stdout);
   assert.match(line(out.stdout, /^review\s/), /\bon: gate_pr reviewer, the checklist session/);
 });
 
-test('enforcement: an outside review pipeline on every PR (an after-gate step without if) turns the review row on', () => {
-  const yaml = YAML.replace('  reviewer: session docs/review-checklist.md\n', '').replace('  review: command node .agents/ci/pipeline-passed.mjs review after-gate\n', '  gate-review: command test -f reviewed after-gate\n');
-  const r = repoWith(yaml);
-  r.gh.set('api.json', FULL(['verify-pr', 'pr-body']));
+test('enforcement: a project file still on after-gate is refused, naming after <step>', () => {
+  const r = repoWith(YAML.replace('  ci: checks\n', '  ci: checks\n  review: command node .agents/ci/pipeline-passed.mjs review after-gate\n'), { layers: false });
   const out = r.lc(['enforcement', '--strict']);
-  assert.match(line(out.stdout, /^review\s/), /\bon: gate_pr gate-review, an after-gate step/);
-  assert.equal(out.status, 0, out.stdout);
-  const narrowed = repoWith(yaml.replace('test -f reviewed after-gate', 'test -f reviewed if mechanism after-gate'));
-  narrowed.gh.set('api.json', FULL(['verify-pr', 'pr-body']));
-  assert.match(line(narrowed.lc(['enforcement']).stdout, /^review\s/), /\boff\b/);
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /gate_pr\.review: "after-gate" is gone; write "after <step>\[,<step>\]"/);
 });
 
 // The rule check binds without a CI host: a gate_pr command step runs lc-rules check --base.

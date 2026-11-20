@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Pull request bodies from the project's template, one section at a time (pr/pr.mjs).
+exec node "$(dirname "$(dirname "$(readlink -f "$0")")")/pr/pr.mjs" "$@"

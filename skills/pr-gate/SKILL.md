@@ -5,14 +5,19 @@ description: Use when a pull request's work is committed and must pass its gate 
 
 # PR gate
 
-The steps are the project's `gate_pr:` block; `paths:` says which files make an `if <key>` step apply. Run `lc-gate run pr <branch>` (no id: the current branch) after each step until `lc-gate check pr <branch>` holds. The runner runs `command` steps and spawns `session` steps; a `here` step is yours.
+The steps are the project's `gate_pr:` block, walked in file order; `paths:` says which files make an `if <key>` step apply. The runner runs `command` steps, reads the host's checks for a `checks` step and spawns `session` steps; a `here` step is yours.
+
+## Order
+
+1. `profiles.commit` green on the head.
+2. Push, then `lc-pr open --title <t> --section "<Heading>=<file>"…`: the body from the template, refused while a required section is empty. `lc-pr section "<Heading>" --file <f>` changes one section later.
+3. `lc-gate run pr <branch>` (no id: the current branch) until `lc-gate check pr <branch>` holds. A step with `after <step>` starts once those pass or are N/A, so the checks that cost no tokens come before the review session.
+
+Once a review exists, main comes in by merge, never by rebase: a clean merge of main keeps every record but `checks`; a hand-resolved one is reviewed again, its resolved lines only.
+
 ## Plan from the tools
 
 Where a `gate_pr:` step ends in `plan`, the plan comes before any code. From `docs.stack_tools`, the brief's **Stack fit** and each touched tool's docs (its **Look up** line), write one line per piece of work in the shapes the step's question file accepts: "I will call `<function>` (`<docs page>`) for `<what>`"; own code only where no tool covers it, with the reason. Write it outside the repository or under `.agents/`, and record it before the first commit: `lc-gate record pr <branch> <step> plan --evidence <file>` (refused after). Once coded, complete each line with the call's `file:line`, add a line for any mechanism the plan missed, and copy the lines under the PR body's `pr_body.heading` for CI's `pr-body` check. A branch with commits before the gate saw it gets `plan na --reason …` from the orchestrator. Under `gate_pr_plan: enforce` the hook refuses an edit or commit of a file the step covers until the plan is recorded, and refuses `git commit --no-verify`.
-
-## Steps after the review pipeline
-
-A step ending in `after-gate` holds only once the review pipeline has reviewed this head. `check` and the gate-start hook skip it: once `check` holds, start the pipeline, then rerun `lc-gate run pr <branch>`. The merge hook and `status --trailer` require it.
 
 ## A `here` step
 
@@ -34,12 +39,11 @@ With no flow to show: for docs, every link resolves and each claim is true at th
 
 ## Reviewer
 
-A `session` step with the project's checklist (`docs.review_checklist`) on every PR, by kind of diff, never the implementer; its brief names the PR's brief, which it judges the diff against. It records `fail` on a P1 or P2 finding. After a fail it reviews only the fix; after two such reviews still failing, the orchestrator decides. Commits after its pass make it stale, and the next session reviews only them: the orchestrator reruns it (`lc-close <name>`, then `lc-gate run pr <branch> --rerun <step>`) or carries it with a reason.
+A `session` step with the project's checklist (`docs.review_checklist`) on every PR, by kind of diff, never the implementer; its brief names the PR's brief, which it judges the diff against. It records `fail` on a P1 or P2 finding. A follow-up review, after a fail or a pass, reads only the PR's own change since (`git log -p --first-parent --remerge-diff`): its commits and a merge's hand-resolved lines. After two reviews after a fix still failing, the orchestrator decides. A new head makes it stale unless only a clean merge of main came in: the orchestrator reruns it (`lc-close <name>`, then `lc-gate run pr <branch> --rerun <step>`) or carries it with a reason.
 
 ## Besides the records
 
 - **Protected files** (`owner_approval`): their own PR, each hunk listed in the body; the owner approves before the merge.
 - **Sensitive changes:** targeted tests for the affected invariants, red on the base and green on the head.
-- **PR body:** invoke `pr`. Under Evidence, the live-check result and each new test's red-then-green proof; `lc-gate status pr <branch> --trailer` where the project asks.
-- **CI:** run `gate.run` with the intent in a file, then wait for `ci.pr_checks`. An empty list is not success.
-- **Merge candidate:** the required checks pass with the PR applied to current main (`merge.candidate`). The orchestrator merges.
+- **PR body:** `lc-pr` writes it; `pr` says what goes in it. Under Evidence, the live-check result and each new test's red-then-green proof; `lc-gate status pr <branch> --trailer` where the project asks.
+- **Merge:** the orchestrator runs `lc-gate merge pr <branch>`: it updates a branch behind main, waits for the checks on the new head and requires every record. On a conflict you merge main by hand and push; the gate reviews the resolved lines.

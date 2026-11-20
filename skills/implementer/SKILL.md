@@ -13,8 +13,8 @@ description: Use when you are a session given a brief to build one pull request,
 6. **Bugs:** `diagnosing-bugs`, reproduced first. **Tests:** regressions at the lowest reliable level, focused tests for core and security invariants (`docs.testing`); `tdd` for a test-first slice, with its seam and what it catches in the report.
 7. **Subagents** only for independent parts, at most `sessions.max_subagents` at a time; check each result yourself. They never gate, push or use a lane.
 8. **Docs** your change makes stale, in the same PR: stories, journeys, roadmap, glossary (`domain-modeling`). "Update the docs" is the `update-docs` sweep.
-9. **Before each push:** follow `machine` before a heavy command; run `profiles.commit` (typecheck and the tests covering the changed files), and `lc-rules check` when the project has `.agents/rules.yaml`, until both exit 0 on the head you push. A failure is yours, even in code you didn't change; if it is not small, file an issue and report it. A rebase without conflicts needs no rerun.
-10. **PR gate:** `lc-gate run pr <branch>` and `pr-gate` until `lc-gate check pr <branch>` holds.
+9. **Before each push:** follow `machine` before a heavy command; run `profiles.commit` (typecheck and the tests covering the changed files), and `lc-rules check` when the project has `.agents/rules.yaml`, until both exit 0 on the head you push. A failure is yours, even in code you didn't change; if it is not small, file an issue and report it. Once a review exists, main comes in by merge, never by rebase.
+10. **PR gate,** in this order (`pr-gate`): the commit check green; push and `lc-pr open` (`lc-pr section` for one section after); `lc-gate run pr <branch>` until `lc-gate check pr <branch>` holds.
 11. **Report** ([report.md](../lifecycle/report.md)) to the orchestrator; stay available for fixes.
 
 Message peers directly about files, lanes and findings; scope, product rules and the plan go to the orchestrator.

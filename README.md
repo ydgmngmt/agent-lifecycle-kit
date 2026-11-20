@@ -46,6 +46,8 @@ The skills call the [mattpocock-skills](https://github.com/mattpocock/skills) se
 2. **`lc-gate enforcement`**: one line per gate step and layer, saying who records it, what refuses without it, and whether that is actually on. `--strict` exits 1 when a configured layer is off.
 3. **`lc-gate protect`**: prints the branch protection for `ci.required_checks`; `--yes` applies it. It only ever adds.
 
+Per pull request: `lc-pr open` writes the body from the template, `lc-gate run pr` walks the gate until `lc-gate check pr` holds, and `lc-gate merge pr` merges, one at a time. The full list is in [Enforcement](docs/enforcement.md#the-commands).
+
 **Mechanical rules.** What the project decided and a diff can break exactly (who may import a package, which dependencies are allowed, words or files that may not appear) becomes a rule in `.agents/rules.yaml`. Each rule names its written decision and is proved on a red and a green example; `lc-rules check` fails a finding beyond the baseline, and CI judges each change by the base commit's rules. The bootstrap writes the first ones; the phase exit proposes more from findings the reviews keep raising, and the owner decides.
 
 ## What enforces what
@@ -54,7 +56,7 @@ The skills call the [mattpocock-skills](https://github.com/mattpocock/skills) se
 | --- | --- | --- |
 | Host refuses | Branch protection set by `lc-gate protect` | A merge while a required check is red or missing, a push to the default branch, administrators skipping either |
 | Local hook refuses | The plugin hook and the git `pre-commit` hook | An edit or commit without its plan, a merge without the PR gate's records |
-| Independent record | The runner, a CI run, the review pipeline, a separate session or the owner | A step its author wants to mark done on their own word |
+| Independent record | The runner, a CI run, the host's checks, a separate session or the owner | A step its author wants to mark done on their own word |
 | Owner reads | The owner, in a pull request of its own, for the files in `protected_files` | A change loosening the rules that judge it; CI judges each change by the base branch's copy |
 | Author's own word | Nobody: never a gate step | Nothing; `lc-gate enforcement` flags it |
 
@@ -67,7 +69,7 @@ The skills call the [mattpocock-skills](https://github.com/mattpocock/skills) se
 ## More
 
 - [Enforcement](docs/enforcement.md): the model, the modes, the step syntax, the commands
-- [Upgrading](docs/upgrading.md): 0.8 to 1.0, 1.0 to 1.1, 1.1 to 1.2, and 1.2 to 1.3
+- [Upgrading](docs/upgrading.md): each release since 0.8
 - [Machine-specific pieces](docs/machine.md)
 - [Proof](docs/proof.md): method, cases and limits
 - [The lifecycle skill](skills/lifecycle/SKILL.md): steps, roles and gates

@@ -241,7 +241,7 @@ test('after a failed review, the next session checks the fix: the earlier findin
   assert.match(r.stdout, /started session/, r.stdout + r.stderr);
   const b = briefAt(f);
   assert.match(b, /Scope: a review after a fix/);
-  assert.match(b, new RegExp(`git diff ${c1} ${f.sh('git rev-parse HEAD')}`));
+  assert.match(b, new RegExp(`git log -p --first-parent --remerge-diff ${c1}\\.\\.${f.sh('git rev-parse HEAD')}`));
   assert.match(b, new RegExp(`findings/review\\.before-${f.sh('git rev-parse --short=12 HEAD')}\\.md`));
   // A candidate that does not descend from the failed one gets a full review.
   failAt(f, f.sh('git rev-parse HEAD'));
@@ -262,7 +262,7 @@ test('commits on top of a passed review get a review of the change since the pas
   f.lc('run', 'phase', 'x', '--candidate', 'HEAD', '--rerun', 'review');
   const b = briefAt(f);
   assert.match(b, /Scope: a review of the change since a pass/);
-  assert.match(b, new RegExp(`git diff ${c1} ${f.sh('git rev-parse HEAD')}`));
+  assert.match(b, new RegExp(`git log -p --first-parent --remerge-diff ${c1}\\.\\.${f.sh('git rev-parse HEAD')}`));
 });
 
 test('with a P1 or P2 still open after two reviews after a fix, run starts no further session: the lead decides', () => {
@@ -302,4 +302,53 @@ test("a PR's review brief names the PR's brief, found by the branch's worktree i
   writeFileSync(join(f.repo, 'state/board/spawned.tsv'), '');
   f.lc('run', 'pr', 'feat', '--candidate', head, '--rerun', 'reviewer');
   assert.match(brief(), /The PR's brief: none known; judge the change against the PR body/);
+});
+
+// A follow-up review reads the PR's own change: its commits and a merge's hand-resolved lines, not main's.
+const PRGATE = 'handoff_dir: $STATE\ngate_pr:\n  reviewer: session q.md\n';
+const recordAt = (f, status, sha) => {
+  const dir = join(f.repo, 'state/gates/pr/feat');
+  mkdirSync(join(dir, 'records'), { recursive: true });
+  mkdirSync(join(dir, 'findings'), { recursive: true });
+  writeFileSync(join(dir, 'findings/reviewer.md'), '| Q1 | Is it right? | yes | q.md:1 | P1: F1 |\n');
+  writeFileSync(join(dir, 'records/reviewer.json'), JSON.stringify({ step: 'reviewer', status, sha, evidence: join(dir, 'findings/reviewer.md'), by: 'gate-feat-reviewer', at: 't', spawned: true }));
+};
+// The brief's scope command, run in the repository.
+const scopeOf = (f) => {
+  const brief = readFileSync(join(f.repo, 'state/gates/pr/feat/briefs', `reviewer-${f.sh('git rev-parse --short=12 HEAD')}.md`), 'utf8');
+  const cmd = brief.match(/`(git log -p --first-parent --remerge-diff [0-9a-f]+\.\.[0-9a-f]+)`/)?.[1];
+  assert.ok(cmd, brief);
+  return f.sh(cmd);
+};
+
+test("a review after a fix on top of a merge of main reads the fix, and none of main's lines", () => {
+  const f = fixture(PRGATE);
+  f.pane('working\n');
+  f.sh('git checkout -q -b feat && echo PRLINE > a.txt && git add a.txt && git commit -qm pr');
+  recordAt(f, 'fail', f.sh('git rev-parse HEAD'));
+  f.sh('git checkout -q main && echo MAINLINE > m.txt && git add m.txt && git commit -qm main && git checkout -q feat && git merge -q --no-edit main');
+  f.sh('echo FIXLINE >> a.txt && git commit -qam fix');
+  const r = f.lc('run', 'pr', 'feat', '--rerun', 'reviewer');
+  assert.match(r.stdout, /started session/, r.stdout + r.stderr);
+  const scope = scopeOf(f);
+  assert.match(scope, /\+FIXLINE/);
+  assert.doesNotMatch(scope, /MAINLINE/);
+});
+
+test('a hand-resolved merge of main is not held: the follow-up review reads exactly its resolved lines', () => {
+  const f = fixture(PRGATE);
+  f.pane('working\n');
+  f.sh("printf 'one\\ntwo\\n' > f.txt && git add f.txt && git commit -qm f");
+  f.sh("git checkout -q -b feat && sed -i 's/two/PRTWO/' f.txt && git commit -qam pr");
+  recordAt(f, 'pass', f.sh('git rev-parse HEAD'));
+  assert.match(f.lc('run', 'pr', 'feat').stdout, /reviewer\s+session\s+PASS/);
+  f.sh("git checkout -q main && sed -i 's/two/MAINTWO/' f.txt && echo MAINLINE > m.txt && git add m.txt && git commit -qam main && git checkout -q feat");
+  f.sh("git merge -q --no-edit main >/dev/null 2>&1 || true; printf 'one\\nRESOLVED\\n' > f.txt && git add f.txt && git commit -qm 'merge main by hand'");
+  const stale = f.lc('run', 'pr', 'feat');
+  assert.match(stale.stdout, /that do not: reviewer/, stale.stdout + stale.stderr);
+  assert.match(stale.stdout, /reviewer\s+session\s+stale: PASS/);
+  f.lc('run', 'pr', 'feat', '--rerun', 'reviewer');
+  const scope = scopeOf(f);
+  assert.match(scope, /^\+RESOLVED$/m);
+  assert.doesNotMatch(scope, /MAINLINE/);
 });

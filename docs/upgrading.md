@@ -59,3 +59,15 @@ After any upgrade, rerun the `bootstrap` skill: it finds what is missing and wal
 - **The live check is a command.** The author keeps a flow script per changed flow; `live-check` in `gate_pr` runs the scripts covering the diff on the pushed head, in place of a session or a pipeline test step. Copy the flow-script item from `templates/review/checklist.md` into your checklist.
 - **1.7.1:** commits on top of a passed session step get a review of only the change since the pass. Give `live-check` its own `paths.live` (the flow paths plus the scripts, their config and helpers), so a script-only change runs its script.
 - **1.7.2:** a new journey's flow script may start from the project's draft command; the orchestrator keeps every session on the latest kit.
+
+## From 1.7 to 1.8
+
+Change the project file before updating the kit: a step line with `after-gate` is refused, and the git pre-commit hook refuses commits while one is left.
+
+- **`after-gate` goes.** Drop the outside review pipeline's step (`review: command node .agents/ci/pipeline-passed.mjs …`) and `.agents/ci/pipeline-passed.mjs`.
+- **`ci: checks`** in `gate_pr`, after the steps that run locally: the host's `ci.required_checks` on the pushed head. With no CI host, leave it out.
+- **`live-check: command … if live after ci`**: `after-gate` becomes `after ci`.
+- **`reviewer: session docs/review-checklist.md after ci,live-check`**: the review starts once the checks pass.
+- **Merge with `lc-gate merge pr <branch>`;** set `merge.command` to it and drop `merge.candidate`. Drop `gate.run` and `ci.pr_checks`.
+- **`pr.template`** and **`pr.required_sections`** (comma-separated) for `lc-pr`; run `./install.sh` again for its link.
+- **Git 2.36** or later, for the follow-up review's `--remerge-diff`.

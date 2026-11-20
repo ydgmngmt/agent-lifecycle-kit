@@ -64,10 +64,10 @@ checks:
   supply_chain: <tool and where it runs>
 
 ci:
-  pr_checks: [<required check names>]     # an empty list is never success; no CI host: only `enforcement: none` here, gate_pr's command steps run the checks
   phase_workflow: <workflow file of the phase run, if CI has one>   # templates/ci/phase.yml
   enforcement: <host settings that enforce the gates, or none (by convention only)>
-  required_checks: verify-pr pr-body      # CI job names the default branch requires; lc-gate protect sets them
+  required_checks: verify-pr pr-body      # CI job names the default branch requires; lc-gate protect sets them, gate_pr's checks step reads them
+  # no CI host: only `enforcement: none` here, no checks step, and gate_pr's command steps run the checks
   # verify-pr: templates/ci/pr.yml (the pr profile and the phase record); pr-body: templates/ci/pr-body.yml
 
 pr_body:                                  # the record a PR body carries, checked by CI's pr-body job
@@ -75,20 +75,24 @@ pr_body:                                  # the record a PR body carries, checke
   if: mechanism                           # only when the diff touches paths.mechanism
   shapes: docs/review/tool-fit.md#accepted-lines   # the fenced block of accepted lines under that heading
 
-gate:
-  run: <gate command, intent from a file>
+pr:                                       # lc-pr: the PR body from the template, one section at a time
+  template: .github/pull_request_template.md
+  required_sections: <headings lc-pr open refuses to leave empty, comma-separated, e.g. Summary, Evidence>
 
 # The gates' steps (lc-gate). One line per step, in the order they run:
-#   <step>: <kind> <argument> [if <paths key>] [plan] [after-gate]
+#   <step>: <kind> <argument> [if <paths key>] [plan] [after <step>[,<step>]]
 # kind: command (the runner runs it) · workflow (a CI workflow file, dispatched with -f candidate=<sha>)
-#       · session (a spawned review session; the argument is its question file) · here (done by the
-#       session running the gate; the argument says what) · owner (a board question).
+#       · checks (no argument: the host's ci.required_checks on the exact commit) · session (a spawned
+#       review session; the argument is its question file) · here (done by the session running the
+#       gate; the argument says what) · owner (a board question).
 # `if <key>` runs the step only when the change touches a glob under paths.<key>.
+# `after <step>` starts the step once each named step above holds with PASS or N/A: the checks that
+# cost no model tokens come before the review session.
 # Keep " #" and " — " out of a step line: the reader cuts a value there.
 # Modes: off | observe (log and tell) | observe <n> | enforce (refuse). `observe <n>` observes until n
 # PRs have merged with every record, then enforces by itself; the hook says so once. A project that
 # wants refusals from the first PR writes enforce. lc-gate enforcement shows where the count stands.
-gate_pr_mode: observe 3                   # the PR gate's records, at the gate start and at gh pr merge or git merge into main
+gate_pr_mode: observe 3                   # the PR gate's records, at lc-gate merge, gh pr merge or git merge into main
 gate_pr_plan: observe 3                   # a step ending in `plan`: edits and commits without its plan
 
 paths:                                    # globs separated by spaces; ** spans directories
@@ -97,17 +101,15 @@ paths:                                    # globs separated by spaces; ** spans 
   sensitive: <globs of the sensitive code paths>
   mechanism: <globs where a new mechanism can land, e.g. apps/** packages/** tools/** **/package.json>
 
-# No step here is the author's own word: each record comes from the runner, a separate session, the
-# review pipeline or the owner (lc-gate enforcement flags a `here` step in gate_pr).
+# No step here is the author's own word: each record comes from the runner, the host, a separate
+# session or the owner (lc-gate enforcement flags a `here` step in gate_pr).
 gate_pr:
   commit-check: command <cmd> verify:commit
   tool-fit: session docs/review/tool-fit.md if mechanism plan   # the author's plan before the first edit; a separate session checks it
   rules: command lc-rules check --base $LC_GATE_BASE   # .agents/rules.yaml, judged by the base's copy; no CI host needed
-  reviewer: session docs/review-checklist.md   # every PR, against its brief, by kind of diff; P1 or P2 fails; the review after a fix checks the fix only
-  review: command node .agents/ci/pipeline-passed.mjs review after-gate   # the review pipeline's own result for the head
-  live-check: command <the command that runs the flow scripts covering the diff> if live after-gate   # on the pushed head; fails on a flow path no script covers
-  # With no review pipeline, a separate session reviews the code instead of the two after-gate steps:
-  # correctness: session docs/review/correctness.md if flow
+  ci: checks                              # ci.required_checks on the pushed head; no CI host: drop it and the "ci" below
+  live-check: command <the command that runs the flow scripts covering the diff> if live after ci   # on the pushed head; fails on a flow path no script covers
+  reviewer: session docs/review-checklist.md after ci,live-check   # every PR, against its brief, by kind of diff; P1 or P2 fails; a follow-up review reads only the PR's own change
 
 gate_phase:
   freeze: command <script that writes the evidence folder: PR list, files, surface diff, baseline growth, quality lists>
@@ -127,8 +129,7 @@ gate_phase:
   lessons: here proposed checklist rules, stale rules pruned
 
 merge:
-  command: <merge command with the validated head SHA>
-  candidate: <merge queue | update the branch from main, then wait for the required checks on the new head>
+  command: lc-gate merge pr <branch>      # updates a behind branch, waits for the checks on the new head, requires every record
   who: orchestrator
 
 # The files that define the rules change only in a PR the owner reads. Globs; or a pointer `file#key`
