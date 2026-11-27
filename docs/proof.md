@@ -2,7 +2,7 @@
 
 ![Without the kit and with it](proof.svg)
 
-Numbers and case shapes only. This is work in progress: more red-team rounds follow, and each one feeds the gates.
+Numbers and case shapes only. This is work in progress: more red-team rounds follow, and each one feeds the gates. Everything below was measured on kit 1.9, whose PR review and Phase exit the 2.0 flow replaced with pstack's swarm and the stage exit; 2.0 has not been through these rounds yet.
 
 ## Without the kit
 

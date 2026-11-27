@@ -1,0 +1,49 @@
+{
+  "pstack": {
+    "plugin": "pstack@cursor-plugins",
+    "version": "0.15.48",
+    "commit": "b7b93c36be9bcc36a74db438e0fd385d660bc559"
+  },
+  "marketplace": "cursor-plugins",
+  "forked": [
+    {
+      "kit": "skills/adlc-mode/SKILL.md",
+      "pristine": "skills/adlc-mode/upstream/SKILL.md",
+      "upstream": "skills/poteto-mode/SKILL.md"
+    },
+    {
+      "kit": "skills/adlc-mode/worker.md",
+      "pristine": "skills/adlc-mode/upstream/worker.md",
+      "upstream": "skills/poteto-mode/worker.md"
+    },
+    {
+      "kit": "skills/adlc-mode/playbooks/feature.md",
+      "pristine": "skills/adlc-mode/upstream/playbooks/feature.md",
+      "upstream": "skills/poteto-mode/playbooks/feature.md"
+    },
+    {
+      "kit": "skills/adlc-mode/playbooks/autopilot-full.md",
+      "pristine": "skills/adlc-mode/upstream/playbooks/autopilot-full.md",
+      "upstream": "skills/poteto-mode/playbooks/autopilot-full.md"
+    },
+    {
+      "kit": "skills/adlc-mode/playbooks/opening-a-pr.md",
+      "pristine": "skills/adlc-mode/upstream/playbooks/opening-a-pr.md",
+      "upstream": "skills/poteto-mode/playbooks/opening-a-pr.md"
+    }
+  ],
+  "vendored": [
+    {
+      "kit": "vendor/thermos/thermo-nuclear-review/SKILL.md",
+      "upstream": "thermos/skills/thermo-nuclear-review/SKILL.md"
+    },
+    {
+      "kit": "vendor/thermos/thermo-nuclear-code-quality-review/SKILL.md",
+      "upstream": "thermos/skills/thermo-nuclear-code-quality-review/SKILL.md"
+    },
+    {
+      "kit": "vendor/cursor-team-kit/deslop/SKILL.md",
+      "upstream": "cursor-team-kit/skills/deslop/SKILL.md"
+    }
+  ]
+}

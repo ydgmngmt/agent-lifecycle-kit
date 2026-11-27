@@ -1,6 +1,6 @@
 # Stack tools
 
-The chosen tools at the versions this repository installs, with their docs and the functions to call (`docs.stack_tools`). Each tool-fit plan line cites a function from here and its docs page.
+The chosen tools at the versions this repository installs, with their docs and the functions to call (`docs.stack_tools`). Each `## Tool fit` line cites a function from here and its docs page.
 
 ## Looking up documentation
 

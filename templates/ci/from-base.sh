@@ -5,7 +5,7 @@
 # them gets a loud line: those files are protected_files, and the owner reads them before merging.
 # The workflows take this script itself from the base commit too.
 # Install: copy to .agents/ci/from-base.sh (templates/ci/pr.yml and pr-body.yml call it there).
-#   bash .agents/ci/from-base.sh <base sha> <head sha> <kit checkout> pr-body|phase
+#   bash .agents/ci/from-base.sh <base sha> <head sha> <kit checkout> pr-body
 set -euo pipefail
 base=$1 head=$2 kit=$3 job=$4
 cd -- "$(git rev-parse --show-toplevel)"
@@ -25,22 +25,8 @@ case $job in
       || cp .agents/ci/pr-body-check.mjs "$side/pr-body-check.mjs" # only the PR that adds it
     node "$side/pr-body-check.mjs" "$kit" "$base" "$head"
     ;;
-  phase)
-    # lc-gate reads the project file at the head it is given: give it the head's tree with the
-    # base's project file, as a commit on top of the head that is never pushed.
-    judged=$head
-    if git cat-file -e "$base:.agents/project.yaml" 2>/dev/null && [ -n "$(git diff --name-only "$base" "$head" -- .agents/project.yaml)" ]; then
-      index=$(mktemp)
-      trap 'rm -f "$index"' EXIT
-      GIT_INDEX_FILE=$index git read-tree "$head"
-      GIT_INDEX_FILE=$index git update-index --cacheinfo "100644,$(git rev-parse "$base:.agents/project.yaml"),.agents/project.yaml"
-      judged=$(git -c user.name=from-base -c user.email=from-base@localhost \
-        commit-tree "$(GIT_INDEX_FILE=$index git write-tree)" -p "$head" -m "the base's project file")
-    fi
-    "$kit/bin/lc-gate" check phase --diff "$base" "$judged"
-    ;;
   *)
-    echo "usage: from-base.sh <base> <head> <kit> pr-body|phase" >&2
+    echo "usage: from-base.sh <base> <head> <kit> pr-body" >&2
     exit 2
     ;;
 esac

@@ -1,8 +1,8 @@
 # Stack decisions
 
-Which tool owns which capability, and what the project's own code owns (`docs.stack_decisions`). The tool-fit plan and review and the stack hunt read it; it changes only in a PR the owner reads.
+Which tool owns which capability, and what the project's own code owns (`docs.stack_decisions`). A pull request's `## Tool fit` section and the stack hunt read it; it changes only in a PR the owner reads.
 
-One section per capability. Number them: plan lines and findings cite `§<n>`.
+One section per capability. Number them: `## Tool fit` lines and findings cite `§<n>`.
 
 ## §1 <capability, e.g. durable background work>
 

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# The kit's tie to the pstack plugin: its folder, and whether upstream moved under the fork (pstack/pstack.mjs).
+exec node "$(dirname "$(dirname "$(readlink -f "$0")")")/pstack/pstack.mjs" "$@"

@@ -45,19 +45,6 @@ async function board() {
   return { repo, data, fake, url, stop: () => server.kill(), calls: () => (existsSync(join(fake, 'calls')) ? readFileSync(join(fake, 'calls'), 'utf8') : '') };
 }
 
-test("the board's state lists read-afterwards.jsonl, newest first, and the page has its panel", async () => {
-  const b = await board();
-  try {
-    const line = (step, at) => JSON.stringify({ gate: 'phase', id: 'core', step, commit: 'a'.repeat(40), reason: 'a dry run', by: 'lead', at });
-    writeFileSync(join(b.data, 'read-afterwards.jsonl'), `${line('acceptance', '2026-11-01T00:00:00Z')}\n${line('signoff', '2026-11-02T00:00:00Z')}\n`);
-    const state = await (await fetch(`${b.url}/api/state`)).json();
-    assert.deepEqual(state.afterwards.map((a) => [a.gate, a.id, a.step, a.reason]), [['phase', 'core', 'signoff', 'a dry run'], ['phase', 'core', 'acceptance', 'a dry run']]);
-    assert.match(await (await fetch(b.url)).text(), /<h2>Read afterwards<\/h2>/);
-  } finally {
-    b.stop();
-  }
-});
-
 test('the board process tells the lead each new answer with lc-tell lead; answers before it started are not told', async () => {
   const b = await board();
   try {

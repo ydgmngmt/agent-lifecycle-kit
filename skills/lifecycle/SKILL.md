@@ -5,22 +5,25 @@ description: ADLC (agent-driven development lifecycle) map: its steps, roles and
 
 # ADLC (agent-driven development lifecycle)
 
-Diagram: [docs/adlc.png](../../docs/adlc.png). Read `.agents/project.yaml` first; skills name its keys as `docs.testing`, `profiles.pr`. A value is literal or a pointer (`path#section`) to the repo file that holds it: follow the pointer, never copy. Where the project's `docs.lifecycle` page says more than this skill, it wins.
+Diagram: [docs/adlc.svg](../../docs/adlc.svg). Read `.agents/project.yaml` first; skills name its keys as `docs.testing`, `profiles.pr`. A value is literal or a pointer (`path#section`) to the repo file that holds it: follow the pointer, never copy. Where the project's `docs.lifecycle` page says more than this skill, it wins.
+
+The build runs on pstack. The kit adds what pstack has none of: the plan step, sessions with a board, checks the host enforces, and the stage exit. A pstack skill is used as written wherever one fits; `adlc-mode` is the kit's fork of pstack's poteto-mode and names every difference.
 
 ## Steps
 
-1. **Product scope:** requirements → stories → phases (`docs.roadmap`), then each phase's acceptance criteria. `shape-product`.
-2. **Briefs:** one small, mergeable change each, with a named owner. `orchestrator`.
-3. **Implementation:** one session per brief in its own worktree; it coordinates shared files with its peers before editing them. `implementer`.
-4. **PR gate**, per change. `pr-gate`.
-5. **Nightly on main:** `profiles.nightly`, green and on time.
-6. **Phase exit**, once a phase's PRs have merged. `phase-exit`. Then the next phase starts.
+A **stage** is one phase of the roadmap, built on its own branch (`stage.branch`).
 
-A fix found at any gate loops back to implementation and is retested.
+1. **Plan:** requirements → stories → stages (`docs.roadmap`), then the stage's acceptance criteria (`shape-product`). The lead splits the stage into pull requests with pstack's Multi-phase plan playbook (`lead`).
+2. **Build:** pstack's Autopilot-full, through `adlc-mode`. One owner session per pull request, on a branch off the stage branch; it picks the playbook that fits (Feature, Bug fix, Refactoring, Perf issue) and delegates the code to its own subagents.
+3. **PR exit**, per pull request: the host's required checks (`ci.required_checks`: tests, rules, the flow scripts covering the diff, the formal check where the project has one), then the lead's swarm of verifiers that wrote none of the code. The PR owner merges into the stage branch only what both cleared.
+4. **Nightly on the default branch:** `profiles.nightly`, green and on time.
+5. **Stage exit**, once the plan's pull requests have merged: the gate on the stage branch's pull request into the default branch (`stage-exit`). Then the docs sweep (`update-docs`) and the next stage.
 
-## Gates
+A fix found at any gate goes back to the build, and is verified by the same rules.
 
-`gate_pr:` and `gate_phase:` in the project file declare each gate's steps, one line each (`<step>: <kind> <argument> [if <paths key>] [after <step>]`); the order lives there only. `lc-gate` walks the list; each step leaves a record (PASS, FAIL, or N/A with a reason) bound to the candidate commit, and `lc-gate check` refuses while one is missing, stale or failed.
+## The stage exit's gate
+
+`gate_pr:` in the project file declares its steps, one line each (`<step>: <kind> <argument> [if <paths key>] [after <step>]`); the order lives there only. It judges only a pull request into the default branch. `lc-gate` walks the list; each step leaves a record (PASS, FAIL, or N/A with a reason) bound to the candidate commit, and `lc-gate check` refuses while one is missing, stale or failed.
 
 | Kind | Who does it |
 | --- | --- |
@@ -28,48 +31,50 @@ A fix found at any gate loops back to implementation and is retested.
 | `workflow` | the runner starts the CI workflow and records the run |
 | `checks` | the runner reads the host's required checks on the exact commit |
 | `session` | the runner spawns a session (`review`) on `sessions.gate_model`; it records its own step |
-| `here` | the session running the gate |
-| `owner` | a board question; the owner's answer is the record |
 
-- `lc-gate run <pr|phase> <id>` does the next thing for each step without a record; rerun to advance. It reports a started session with no activity for 60 seconds.
-- `lc-gate status <gate> <id>`: one row per step. Read it before saying anything about a gate.
-- `gate_pr_mode`, `gate_pr_plan` (`off`, `observe`, `observe <n>`, `enforce`): whether a missing PR record or plan warns or refuses; `observe <n>` enforces once n PRs merged with every record.
+- `lc-gate run pr <stage branch> --wait` does the next thing for each step without a record, and returns when a step changes.
+- `lc-gate status pr <stage branch>`: one row per step. Read it before saying anything about the gate.
 - `lc-gate enforcement`: what refuses without each step, and whether each layer is on. Read it before calling a gate binding.
-- `lc-gate merge pr <branch>`: the one way a PR merges, one at a time.
+- `lc-gate merge pr <stage branch>`: the one way a stage enters the default branch.
 
 Terms:
 
-- **Full review:** the first review of a PR.
-- **Follow-up review:** any later one, scoped to the PR's own change since.
-- **Holds:** a record still counts for a new head by rule (a clean merge of main; a command's `if` paths untouched).
+- **Full review:** the first review of the stage.
+- **Follow-up review:** any later one, scoped to the change since. It starts by itself.
+- **Holds:** a record still counts for a new head by rule (a clean merge of the default branch; a command's `if` paths untouched).
 - **Carry:** the lead's manual act of keeping a record for a new head, with a reason.
+- **Verdict:** the swarm's `PASS`, `PASS+NOTES` or `FAIL` on a pull request into the stage branch, posted as a comment with the commit it covers.
 
 ## Roles
 
-- **Owner:** a person. Decides product meaning, scope, access, spend and authority; approves `owner_approval` changes; accepts each phase.
-- **Orchestrator (the lead):** one session per phase (`sessions.lead`). Briefs, starts sessions, merges, keeps the running log. Only the lead records N/A, carries a record or starts a review past `sessions.gate_rounds`.
-- **Implementer:** one session per brief.
+- **Owner:** a person. Decides product meaning, scope, access, spend and authority; agrees each stage's acceptance criteria; approves `owner_approval` changes; confirms a brief marked `rigor: critical`.
+- **Lead:** one session per stage (`sessions.lead`), the root of Autopilot-full. Plans, starts owner sessions, runs the swarm and owns its verdicts, runs the stage exit, keeps the running log and the board.
+- **PR owner:** one session per pull request, from build to merge.
+- **Verifiers:** the lead's subagents, per pull request; they wrote none of its code.
 - **Gate sessions:** each started by `lc-gate run` with one question file.
 - **Board keeper:** a cheap session that keeps the board true (`board`).
 
-Status and questions go to the orchestrator. Peers settle shared files, lanes and findings between them and tell the orchestrator the outcome; anything changing scope, a product rule or the plan goes to the orchestrator.
+Owner sessions reach the lead with `lc-tell lead`. Anything changing scope, a product rule or the plan goes to the lead, and from the lead to the owner on the board.
 
-## What enforces the gates
+## What enforces what
 
-Say plainly which gate the host enforces (required checks, "up to date with main", a merge queue; a rule admins may bypass enforces nothing when agents use an admin's token) and which holds only by its records; check `ci.enforcement` first. CI runs `lc-gate check phase --diff`, so a phase can't be marked done without its record. A record shows a step ran, not that its result is right.
+Say plainly which part the host enforces (required checks on the stage branch and the default branch) and which holds by a hook and its records (the stage exit); check `ci.enforcement` and `lc-gate enforcement` first. The swarm's verdict is the playbook's rule, kept by the lead and the owner session: no hook reads it. A record shows a step ran, not that its result is right.
 
 ## Which skill fires when
 
-| Step | Kit skill | Base skills |
+| Step | Kit skill | pstack (read at `<pstack>/skills/`), and others |
 | --- | --- | --- |
-| Product scope, criteria | `shape-product` | `grilling`, `domain-modeling`, `research` |
-| Briefs, sessions, merges | `orchestrator` | `writing-for-agents`, `codebase-design`, `prototype`, `grilling` |
-| Implementation | `implementer` | `tdd`, `diagnosing-bugs`, `codebase-design` |
-| PR gate | `pr-gate` | `code-review`, `pr`, `diagnosing-bugs` |
-| Gate session | `review` | `code-review`, `codebase-design`, `diagnosing-bugs`, `domain-modeling` |
-| Phase exit | `phase-exit` | `diagnosing-bugs` |
-| New repository | `bootstrap` | `grilling` |
-| "Update the docs" | `update-docs` | `domain-modeling` |
+| Product scope, criteria | `shape-product` | `grilling`, `domain-modeling` (mattpocock-skills); Investigation, **how**, **why** for facts |
+| Splitting a stage | `lead` | Multi-phase plan, Prototype, **architect** |
+| Leading a stage | `lead`, `adlc-mode` | Autopilot-full, **swarm**, **ketchup**, Babysit |
+| Building a pull request | `adlc-mode` | Feature, Bug fix, Refactoring, Perf issue, Opening a PR; **architect**, **statechart**, **tdd**, **no-comments**, the principles |
+| Proving it live | the project's `verify-<app>` | **create-verification-skill**, **maintain-verification-skill** |
+| A correction | `adlc-mode` | **correct**, **no-comments**; `lc-rules` |
+| A model or a proof | the project's formal verification skill | **statechart**, **create-formal-verification-skill**, **maintain-formal-verification-skill** |
+| Stage exit | `stage-exit`, `review` | Thermos (vendored rubrics), the kit's stack hunt |
+| A critical brief | `adlc-mode` | **arena**, **interrogate** |
+| New repository | `bootstrap` | **setup-pstack**, **create-verification-skill**, **create-formal-verification-skill** |
+| "Update the docs" | `update-docs` | `domain-modeling`; **technical-writing**, **unslop** |
 | Board | `board` | none |
 
-Base skills are `mattpocock-skills:<name>` in Claude Code, or the bare `<name>` where installed as user skills (Codex reads `~/.agents/skills`). Shared: [finding.md](finding.md) (the finding format and dispositions), [report.md](report.md) (a session's done or blocked report).
+`lc-pstack path` prints `<pstack>`. Most pstack skills load only by reading their file, as `adlc-mode` says. Shared: [finding.md](finding.md) (the finding format and dispositions), [report.md](report.md) (an owner session's merge-ready report).

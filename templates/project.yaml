@@ -7,20 +7,19 @@
 name: <project name>
 
 docs:
-  agents: AGENTS.md                       # operating model and invariants
+  agents: AGENTS.md                       # operating model, invariants, and the rule table: each rule with what enforces it
   product: <product doc>                  # what is built and why
   stories: <user stories>
   journeys: <user journeys>
   glossary: GLOSSARY.md
   decisions: <ADR folder>/
-  roadmap: docs/roadmap.md                # phases, their stories, acceptance criteria, PRs
-  acceptance: docs/acceptance/            # one acceptance-criteria file per phase, if not inline in the roadmap
+  roadmap: docs/roadmap.md                # stages (the roadmap's phases), their stories, acceptance criteria, PRs
+  acceptance: docs/acceptance/            # one acceptance-criteria file per stage: lc-criteria reads its ids
   lifecycle: docs/agents/lifecycle.md     # this project's way of working
   orchestration: docs/agents/orchestration.md
-  phase_review: docs/agents/phase-review.md   # the phase exit's values (templates/phase-review.md)
-  phase_records: docs/phase-reviews/      # lc-gate status phase <id> --write writes <id>.md here
   testing: TESTING.md
-  review_checklist: docs/review-checklist.md   # templates/review/checklist.md: each item with its severity
+  verification: .claude/skills/verify-<app>/   # the project's verification skill (pstack create-verification-skill): launch, drive, flow scripts, feature map
+  formal: <the project's formal verification skill (pstack create-formal-verification-skill): TLA+ models, Lean proofs; or none>
   code_map: docs/agents/code-map.md       # which module owns which concept
   stack_decisions: docs/stack-decisions.md   # which tool owns which capability (templates/review/stack-decisions.md)
   stack_tools: docs/stack-tools.md        # each tool's functions and documentation lookups (templates/review/stack-tools.md)
@@ -38,12 +37,9 @@ docs:
     - docs/agents/lifecycle.md
     - .agents/project.yaml
     - docs/roadmap.md
-    - <phase acceptance files>
-    - docs/agents/phase-review.md
-    - <phase records>
+    - <stage acceptance files>
     - docs/agents/orchestration.md
     - docs/agents/code-map.md
-    - docs/review-checklist.md
     - TESTING.md
     - <gate runbook>
     - AGENTS.md
@@ -54,124 +50,100 @@ update_docs:
 
 profiles:                                 # one entry point per moment; CI calls pr and nightly
   commit: <cmd> verify:commit             # before each push: typecheck + specs covering changed files
-  pr: <cmd> verify:pr                     # what PR CI runs
-  phase: <cmd> verify:phase               # the phase run, in order
+  pr: <cmd> verify:pr                     # what PR CI runs: build, typecheck, tests, and the flow scripts covering the diff
+  acceptance: <cmd> verify:acceptance     # the stage exit: lc-criteria <the stage's acceptance file> <flow script folder>, then every flow script and the property-based UI tests
+  stage: <cmd> verify:stage               # the stage exit's regression run, in order
   nightly: <cmd> verify:nightly           # full suite on main
 
-checks:
-  duplicates: <cmd>                       # supports --list and --prune
-  dead_code: <cmd>
-  supply_chain: <tool and where it runs>
-
 ci:
-  phase_workflow: <workflow file of the phase run, if CI has one>   # templates/ci/phase.yml
   enforcement: <host settings that enforce the gates, or none (by convention only)>
-  required_checks: verify-pr pr-body      # CI job names the default branch requires; lc-gate protect sets them, gate_pr's checks step reads them
+  required_checks: verify-pr pr-body      # CI job names every pull request needs green: lc-gate protect sets them on the default branch and, with --branch, on each stage branch; gate_pr's checks step reads them
   # no CI host: only `enforcement: none` here, no checks step, and gate_pr's command steps run the checks
-  # verify-pr: templates/ci/pr.yml (the pr profile and the phase record); pr-body: templates/ci/pr-body.yml
+  # verify-pr: templates/ci/pr.yml (the pr profile and the rules); pr-body: templates/ci/pr-body.yml; a project with a formal model adds formal: templates/ci/formal.yml
 
 pr_body:                                  # the record a PR body carries, checked by CI's pr-body job
   heading: Tool fit                       # the body's section: ## Tool fit
   if: mechanism                           # only when the diff touches paths.mechanism
   shapes: docs/review/tool-fit.md#accepted-lines   # the fenced block of accepted lines under that heading
 
-pr:                                       # lc-pr: the PR body from the template, one section at a time
-  template: .github/pull_request_template.md
-  required_sections: <headings lc-pr open refuses to leave empty, comma-separated, e.g. Summary, Evidence>
+stage:
+  branch: stage/<id>                      # each stage's branch, cut from the default branch; its PRs land here, and its own PR into the default branch is the stage exit
+  plans: <handoff_dir>/plans/             # one plan file per stage (pstack multi-phase-plan): each PR section is its PR owner's scope
 
-# The gates' steps (lc-gate). One line per step, in the order they run:
-#   <step>: <kind> <argument> [if <paths key>] [plan] [after <step>[,<step>]]
+# The stage exit's steps (lc-gate): the gate on the stage branch's pull request into the default
+# branch. A pull request into a stage branch has no steps here: the host's required checks and its
+# swarm verdict (the adlc-mode skill, Autopilot-full) land it. One line per step, in the order they run:
+#   <step>: <kind> <argument> [if <paths key>] [after <step>[,<step>]]
 # kind: command (the runner runs it) · workflow (a CI workflow file, dispatched with -f candidate=<sha>)
 #       · checks (no argument: the host's ci.required_checks on the exact commit) · session (a spawned
-#       review session; the argument is its question file) · here (done by the session running the
-#       gate; the argument says what) · owner (a board question).
+#       review session; the argument is its question file).
 # `if <key>` runs the step only when the change touches a glob under paths.<key>.
 # `after <step>` starts the step once each named step above holds with PASS or N/A: the checks that
-# cost no model tokens come before the review session.
+# cost no model tokens come before the review sessions.
 # Keep " #" and " — " out of a step line: the reader cuts a value there. An argument may not end in
-# `plan`, `if <word>` or `after <word>` (read as the flags): quote it, e.g. bash -c 'terraform plan'.
-# Modes: off | observe (log and tell) | observe <n> | enforce (refuse). `observe <n>` observes until n
-# PRs have merged with every record, then enforces by itself; the hook says so once. A project that
-# wants refusals from the first PR writes enforce. lc-gate enforcement shows where the count stands.
-gate_pr_mode: observe 3                   # the PR gate's records, at lc-gate merge, gh pr merge or git merge into main
-gate_pr_plan: observe 3                   # a step ending in `plan`: edits and commits without its plan
+# `if <word>` or `after <word>` (read as the flags): quote it, e.g. bash -c 'terraform plan'.
+# Modes: off | observe (log and tell) | enforce (refuse).
+gate_pr_mode: enforce                     # the stage exit's records, at lc-gate merge, gh pr merge or git merge into the default branch
 
 paths:                                    # globs separated by spaces; ** spans directories
-  flow: <globs of code a person or agent uses, e.g. apps/web/** packages/api/**>
-  live: <paths.flow plus the flow scripts, their config and helpers>
-  sensitive: <globs of the sensitive code paths>
+  code: <globs of everything but prose, e.g. apps/** packages/** tools/** e2e/** **/package.json .github/** .agents/**>
+  sensitive: <globs of the sensitive code paths: a brief touching them is proposed as rigor: critical>
   mechanism: <globs where a new mechanism can land, e.g. apps/** packages/** tools/** **/package.json>
+  formal: <globs of the formal models and proofs and the code they map to, or delete the key>
 
-# No step here is the author's own word: each record comes from the runner, the host, a separate
-# session or the owner (lc-gate enforcement flags a `here` step in gate_pr).
+# No step here is the author's own word: each record comes from the runner, the host or a separate
+# session. `if code` makes a docs-only pull
+# request (the docs sweep) N/A for every step but the host's checks and the rules.
 gate_pr:
-  commit-check: command <cmd> verify:commit
-  tool-fit: session docs/review/tool-fit.md if mechanism plan   # the author's plan before the first edit; a separate session checks it
+  ci: checks                              # ci.required_checks on the pushed head; no CI host: drop it and each "ci" below
   rules: command lc-rules check --base $LC_GATE_BASE   # .agents/rules.yaml, judged by the base's copy; no CI host needed
-  ci: checks                              # ci.required_checks on the pushed head; no CI host: drop it and the "ci" below
-  live-check: command <the command that runs the flow scripts covering the diff> if live after ci   # on the pushed head; fails on a flow path no script covers
-  reviewer: session docs/review-checklist.md after ci,live-check   # every PR, against its brief, by kind of diff; P1 or P2 fails; a follow-up review reads only the PR's own change
-
-gate_phase:
-  freeze: command <script that writes the evidence folder: PR list, files, surface diff, baseline growth, quality lists>
-  regression: workflow <phase workflow file>
-  integration: workflow <integration workflow file>
-  built: session docs/review/built-as-described.md
-  correctness: session docs/review/correctness.md
-  security: session docs/review/security.md
-  architecture: session docs/review/architecture.md
-  stack: session docs/review/stack-hunt.md
-  duplication: session docs/review/duplication.md
-  dead-code: session docs/review/dead-code.md
-  docs: session docs/review/docs.md
-  findings: here one list, every finding with a disposition
-  fix-retest: here blocking findings fixed, affected steps rerun or carried
-  acceptance: owner
-  lessons: here proposed checklist rules, stale rules pruned
+  regression: workflow <stage workflow file> if code       # the full regression and integration run on the stage's head
+  acceptance: command <cmd> verify:acceptance if code after ci   # every criterion has a flow script (lc-criteria), and every flow script passes
+  thermo-review: session docs/review/thermo-review.md if code after ci,acceptance    # bugs, breakage, security, developer setup, feature leaks
+  thermo-quality: session docs/review/thermo-quality.md if code after ci,acceptance  # structure and maintainability, by the Thermos bar
+  stack: session docs/review/stack-hunt.md if mechanism after ci,acceptance          # a chosen tool rebuilt under another name
 
 merge:
-  command: lc-gate merge pr <branch>      # updates a behind branch, waits for the checks on the new head, requires every record
-  who: orchestrator
+  command: lc-gate merge pr <stage branch>   # updates a behind branch, waits for the checks on the new head, requires every record
+  who: lead
 
 # The files that define the rules change only in a PR the owner reads. Globs; or a pointer `file#key`
 # to a list kept elsewhere. lc-gate enforcement names each rule file missing from it.
-owner_approval: [.agents/project.yaml, .agents/ci/**, .githooks/**, .github/workflows/**, docs/review/**, docs/review-checklist.md, docs/stack-decisions.md, docs/stack-tools.md, docs/stack-exceptions.md]
-protected_files: [.agents/project.yaml, .agents/rules.yaml, .agents/rules-baseline.json, .agents/ci/**, .githooks/**, .github/workflows/**, docs/review/**, docs/review-checklist.md, docs/stack-decisions.md, docs/stack-tools.md, docs/stack-exceptions.md]
-pinned_files: []                          # change only when a brief schedules it
-sensitive: <sensitive code paths, approved by an independent reviewer session (where they are listed, or the list)>
+owner_approval: [.agents/project.yaml, .agents/ci/**, .github/workflows/**, docs/review/**, docs/stack-decisions.md, docs/stack-tools.md, docs/stack-exceptions.md]
+protected_files: [.agents/project.yaml, .agents/rules.yaml, .agents/rules-baseline.json, .agents/ci/**, .github/workflows/**, docs/review/**, docs/stack-decisions.md, docs/stack-tools.md, docs/stack-exceptions.md]
+pinned_files: []                          # change only when a plan schedules it
 
 lanes:
   list: []                                # stack lanes for sessions; one per checkout
   ci: <lane reserved for CI, if any>
   up: <command to bring a stack up on a lane>
 
-browser: <browser tooling for live checks, or none (no UI)>
+browser: <the browser test tool the flow scripts use, or none (no UI)>
 machine: <limits on heavy commands, if any>
 
-handoff_dir: <directory for briefs/, reports/, intents/, logs/, owner-reads/>
+handoff_dir: <directory for plans/, kickoffs/, reports/, trails/, logs/, owner-reads/>
 
 board:                                    # lc-board: the owner's page (kit board/)
   port: 4777
   data_dir: <dir for state.json, questions.json, answers.jsonl; default handoff_dir/board>
-  running_log: <the phase's running log; the keeper reads its new lines with lc-board log>
+  running_log: <the stage's running log; the keeper reads its new lines with lc-board log>
   keeper_model: <a cheap model for the board keeper>
   keeper_effort: low
   # keeper_flags: <extra agent flags; default: no MCP servers, no settings, only the kit's skills>
 
 sessions:                                 # read by lc-spawn, lc-close, lc-view
   tmux_session: <name>
-  agent_cmd: claude                       # claude or codex
-  model: <model>
-  effort: <effort>
-  gate_model: opus                        # the gate sessions lc-gate run starts; never the lead's LC_MODEL
-  gate_effort: xhigh
+  agent_cmd: claude                       # pstack has no Codex adapter: owner sessions and the lead run in Claude Code
+  model: opus                             # owner sessions; pstack's own roles are in ~/.claude/rules/pstack-models.md (docs/machine.md)
+  effort: medium
+  gate_model: opus                        # the stage exit's review sessions; never the lead's LC_MODEL
+  gate_effort: high                       # review runs one step above the build
   # gate_parallel: <n>                    # how many gate sessions lc-gate run starts at a time; unset: all at once
   # gate_setup: <cmd, e.g. pnpm install>  # run once in one worktree per gate candidate, where its sessions read; unset: each makes its own
   # gate_rounds: 2                        # follow-up reviews of a step that may end in FAIL before only the lead starts another
   # gate_flags: <agent flags for gate sessions in place of agent_flags; {kit} is the kit's directory (docs/machine.md)>
   # memory_floor_mb: <n>                  # lc-spawn starts no session while less memory is available
-  lead: <the orchestrator's tmux window name; lc-tell lead and the board's answers reach it>
-  agent_flags: <how gate sessions get permissions unattended, e.g. --permission-mode auto>   # "": each stops at its first prompt
-  max_subagents: <n>                      # how many subagents one session runs at a time
+  lead: <the lead's tmux window name; lc-tell lead and the board's answers reach it>
+  agent_flags: <how sessions get permissions unattended, e.g. --permission-mode auto>   # "": each stops at its first prompt
   owner_read: <command that opens a diff or doc for the owner>
   open_tab: <command that opens a terminal tab on a new session, given its name as $1, and leaves the focus where the owner is (docs/machine.md)>   # unset: no tab, the owner sees no session

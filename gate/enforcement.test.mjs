@@ -1,4 +1,4 @@
-// lc-gate enforcement, lc-gate protect and the self-ending observe period, against a stubbed gh.
+// lc-gate enforcement, lc-gate protect and the merge hook, against a stubbed gh.
 // Run: node --test gate/*.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,9 +11,8 @@ import { fileURLToPath } from 'node:url';
 const GATE = fileURLToPath(new URL('./gate.mjs', import.meta.url));
 const KIT = fileURLToPath(new URL('..', import.meta.url));
 
-// This kit's bin first: a commit runs the pre-commit template, which calls lc-gate from PATH.
 const sh = (cwd, cmd) => {
-  const r = spawnSync('bash', ['-c', cmd], { cwd, encoding: 'utf8', env: { ...process.env, PATH: `${KIT}bin:${process.env.PATH}` } });
+  const r = spawnSync('bash', ['-c', cmd], { cwd, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   return r.stdout.trim();
 };
@@ -57,19 +56,16 @@ docs:
 ci:
   required_checks: verify-pr pr-body
 gate_pr_mode: enforce
-gate_pr_plan: enforce
 paths:
   mechanism: src/**
 gate_pr:
-  tool-fit: session docs/review/tool-fit.md if mechanism plan
+  tool-fit: session docs/review/tool-fit.md if mechanism
   reviewer: session docs/review-checklist.md
   ci: checks
-gate_phase:
-  stack: session docs/review/stack-hunt.md
-protected_files: [.agents/project.yaml, .agents/ci/**, .githooks/pre-commit, .github/workflows/**, docs/review/**, docs/review-checklist.md]
+protected_files: [.agents/project.yaml, .agents/ci/**, .github/workflows/**, docs/review/**, docs/review-checklist.md]
 `;
 
-// A repository with every layer on: workflows for the checks, the git hook, the plugin enabled.
+// A repository with every layer on: workflows for the checks, the plugin enabled.
 function repoWith(yaml = YAML, { layers = true } = {}) {
   const repo = mkdtempSync(join(tmpdir(), 'lc-enf-'));
   const home = mkdtempSync(join(tmpdir(), 'lc-home-'));
@@ -82,9 +78,8 @@ function repoWith(yaml = YAML, { layers = true } = {}) {
   writeFileSync(join(repo, 'docs/review-checklist.md'), '1. (must-fix) Is every statement true?\n');
   if (layers) {
     mkdirSync(join(repo, '.github/workflows'), { recursive: true });
-    writeFileSync(join(repo, '.github/workflows/pr.yml'), 'jobs:\n  verify-pr:\n    steps:\n      - run: bash .agents/ci/from-base.sh "$B" "$H" .lc-kit phase\n');
+    writeFileSync(join(repo, '.github/workflows/pr.yml'), 'jobs:\n  verify-pr:\n    steps:\n      - run: bash .agents/ci/from-base.sh "$B" "$H" .lc-kit pr-body\n');
     writeFileSync(join(repo, '.github/workflows/pr-body.yml'), 'jobs:\n  pr-body:\n    steps:\n      - run: bash .agents/ci/from-base.sh "$B" "$H" .lc-kit pr-body\n');
-    sh(repo, `mkdir -p .githooks && cp ${KIT}templates/githooks/pre-commit .githooks/ && git config core.hooksPath .githooks`);
     mkdirSync(join(home, '.claude'), { recursive: true });
     writeFileSync(join(home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'agent-lifecycle-kit@agent-lifecycle-kit': true } }));
   }
@@ -102,7 +97,7 @@ test('enforcement: every layer on, --strict holds', () => {
   r.gh.set('api.json', FULL(['verify-pr', 'pr-body']));
   const out = r.lc(['enforcement', '--strict']);
   assert.equal(out.status, 0, out.stdout + out.stderr);
-  for (const re of [/required checks/, /up to date/, /pull requests only/, /administrators included/, /core\.hooksPath/, /Claude Code plugin hook/, /workflow for verify-pr/, /workflow for pr-body/, /base branch's copy/]) {
+  for (const re of [/required checks/, /up to date/, /pull requests only/, /administrators included/, /Claude Code plugin hook/, /workflow for verify-pr/, /workflow for pr-body/, /base branch's copy/]) {
     assert.match(line(out.stdout, re), /\bon\b/, `${re}: ${line(out.stdout, re)}`);
   }
   assert.match(line(out.stdout, /gate_pr ci: checks/), /independent record.*the host's check runs on the exact commit.*lc-gate merge.*\bon$/);
@@ -112,16 +107,15 @@ test('enforcement: every layer on, --strict holds', () => {
 });
 
 test('enforcement: each layer off is named, and --strict exits 1; without --strict, 0', () => {
-  const yaml = YAML.replace('  ci: checks', '  self-review: here code-review of the diff\n  ci: checks').replace(/protected_files: .*\n/, 'protected_files: [.agents/project.yaml]\n');
+  const yaml = YAML
+  .replace(/protected_files: .*\n/, 'protected_files: [.agents/project.yaml]\n');
   const r = repoWith(yaml, { layers: false });
   r.gh.set('api.err', 'gh: Branch not protected (HTTP 404)\n');
   const out = r.lc(['enforcement', '--strict']);
   assert.equal(out.status, 1);
   assert.match(line(out.stdout, /required checks/), /\boff\b.*not protected/);
-  assert.match(line(out.stdout, /core\.hooksPath/), /\boff\b/);
   assert.match(line(out.stdout, /Claude Code plugin hook/), /\boff\b/);
   assert.match(line(out.stdout, /workflow for verify-pr/), /\boff\b/);
-  assert.match(line(out.stdout, /self-review/), /author's own word.*\boff\b/);
   assert.match(line(out.stdout, /^owner reads\s+gate rule file docs\/review\/tool-fit\.md/), /\boff\b.*protected_files/);
   assert.match(line(out.stdout, /^owner reads\s+gate rule file \.agents\/project\.yaml/), /\bon$/);
   assert.match(out.stdout, /configured layer\(s\) off/);
@@ -237,85 +231,39 @@ test('protect: the host plan refuses in one line; no required_checks is an error
   assert.match(bare.lc(['protect']).stderr, /ci\.required_checks/);
 });
 
-// observe <n>: the gate observes until n PRs merged with every record, then enforces by itself.
+// A one-step gate_pr, in a given mode.
 const COUNTED = (mode) => `handoff_dir: $STATE\ngate_pr_mode: ${mode}\ngate_pr:\n  review: session q.md\n`;
 
-test('observe <n>: counts merges with every record, ignores one with a missing record, then enforces once', () => {
-  const r = repoWith(COUNTED('observe 2'), { layers: false });
-  const hook = (command) =>
-    spawnSync(process.execPath, [GATE, 'hook'], { cwd: r.repo, encoding: 'utf8', env: { ...process.env, LC_GATE_STEP: '', PATH: `${r.gh.dir}:/usr/bin:/bin` }, input: JSON.stringify({ tool_name: 'Bash', cwd: r.repo, tool_input: { command } }) });
-  const pr = (branch, recorded) => {
-    r.git(`git checkout -q -b ${branch} main && git commit -q --allow-empty -m ${branch}`);
-    const head = r.git('git rev-parse HEAD');
-    if (recorded) assert.equal(r.lc(['record', 'pr', branch, 'review', 'na', '--reason', 'docs only', '--candidate', 'HEAD']).status, 0);
-    r.gh.set('view.json', JSON.stringify({ headRefName: branch, headRefOid: head }));
-    return hook('gh pr merge --squash');
-  };
-  assert.equal(pr('a', true).status, 0);
-  assert.match(line(r.lc(['enforcement']).stdout, /gate_pr_mode/), /observing, 1 of 2/);
-  const missing = pr('b', false);
-  assert.equal(missing.status, 0);
-  assert.match(missing.stdout, /observe mode/);
-  assert.match(line(r.lc(['enforcement']).stdout, /gate_pr_mode/), /observing, 1 of 2/);
-  assert.equal(pr('c', true).status, 0);
-  assert.match(line(r.lc(['enforcement']).stdout, /gate_pr_mode/), /enforce \(observe 2 ended: 2 merged with every record\)/);
-  const first = pr('d', false);
-  assert.equal(first.status, 2);
-  assert.match(first.stderr, /refusals are now real/);
-  const again = hook('gh pr merge --squash');
-  assert.equal(again.status, 2);
-  assert.doesNotMatch(again.stderr, /refusals are now real/);
-});
-
-test('observe <n> on gate_pr_plan: the edit hook refuses once n PRs merged with every record', () => {
-  const yaml = `handoff_dir: $STATE\ngate_pr_mode: observe\ngate_pr_plan: observe 1\npaths:\n  mech: src/**\ngate_pr:\n  fit: session q.md if mech plan\n`;
-  const r = repoWith(yaml, { layers: false });
-  const hook = (tool, input) =>
-    spawnSync(process.execPath, [GATE, 'hook'], { cwd: r.repo, encoding: 'utf8', env: { ...process.env, LC_GATE_STEP: '', PATH: `${r.gh.dir}:/usr/bin:/bin` }, input: JSON.stringify({ tool_name: tool, cwd: r.repo, tool_input: input }) });
-  r.git('git checkout -q -b a && git commit -q --allow-empty -m a');
-  assert.equal(hook('Edit', { file_path: join(r.repo, 'src/x.js') }).status, 0);
-  assert.equal(r.lc(['record', 'pr', 'a', 'fit', 'na', '--reason', 'no src change', '--candidate', 'HEAD']).status, 0);
-  r.gh.set('view.json', JSON.stringify({ headRefName: 'a', headRefOid: r.git('git rev-parse HEAD') }));
-  assert.equal(hook('Bash', { command: 'gh pr merge --squash' }).status, 0);
-  r.git('git checkout -q -b b main');
-  const edit = hook('Edit', { file_path: join(r.repo, 'src/x.js') });
-  assert.equal(edit.status, 2);
-  assert.match(edit.stderr, /refusals are now real/);
-});
-
-test('a mode that is not off, observe, observe <n> or enforce is an error', () => {
+test('a mode that is not off, observe or enforce is an error', () => {
   const r = repoWith(COUNTED('observe two'), { layers: false });
   assert.match(r.lc(['enforcement']).stdout + r.lc(['enforcement']).stderr, /gate_pr_mode is "observe two"/);
 });
 
-test('the project template: modes observe 3, no here step in gate_pr, the review after the checks, the stack hunt its own phase step', async () => {
+test('the project template: gate_pr is the stage exit, scripts before the three review sessions', async () => {
   const { parseProject } = await import('../board/config.mjs');
   const { parseSteps } = await import('./gate.mjs');
   const conf = parseProject(readFileSync(join(KIT, 'templates/project.yaml'), 'utf8'));
-  assert.equal(conf.gate_pr_mode, 'observe 3');
-  assert.equal(conf.gate_pr_plan, 'observe 3');
+  assert.equal(conf.gate_pr_mode, 'enforce');
   const pr = parseSteps(conf, 'pr');
-  assert.deepEqual(pr.filter((s) => s.kind === 'here'), []);
   assert.deepEqual(pr.find((s) => s.id === 'ci'), { id: 'ci', kind: 'checks', arg: '', if: null });
-  assert.deepEqual(pr.find((s) => s.id === 'live-check').after, ['ci']);
-  assert.deepEqual(pr.map((s) => s.id).slice(-3), ['ci', 'live-check', 'reviewer']);
+  assert.deepEqual(pr.map((s) => s.id), ['ci', 'rules', 'regression', 'acceptance', 'thermo-review', 'thermo-quality', 'stack']);
+  const sessions = pr.filter((s) => s.kind === 'session');
+  assert.deepEqual(sessions.map((s) => s.arg), ['docs/review/thermo-review.md', 'docs/review/thermo-quality.md', 'docs/review/stack-hunt.md']);
+  for (const s of sessions) assert.deepEqual(s.after, ['ci', 'acceptance']);
   assert.ok(!existsSync(join(KIT, 'templates/ci/pipeline-passed.mjs')));
-  assert.equal(pr.find((s) => s.id === 'tool-fit').plan, true);
-  assert.equal(parseSteps(conf, 'phase').find((s) => s.id === 'stack').arg, 'docs/review/stack-hunt.md');
   assert.equal(conf['ci.required_checks'], 'verify-pr pr-body');
+  assert.equal(conf['sessions.gate_effort'], 'high');
 });
 
-// Every PR is reviewed against the checklist, by kind of diff: a prose-only diff included.
-test('the project template: the checklist reviews every PR against its brief first, and its first Docs item fails a false statement', async () => {
-  const { parseProject } = await import('../board/config.mjs');
-  const { parseSteps, questions } = await import('./gate.mjs');
-  const conf = parseProject(readFileSync(join(KIT, 'templates/project.yaml'), 'utf8'));
-  const pr = parseSteps(conf, 'pr');
-  assert.deepEqual(pr.find((s) => s.id === 'reviewer'), { id: 'reviewer', kind: 'session', arg: conf['docs.review_checklist'], if: null, after: ['ci', 'live-check'] });
-  assert.deepEqual(pr.filter((s) => /correctness/.test(s.arg)), []);
-  const qs = questions(readFileSync(join(KIT, 'templates/review/checklist.md'), 'utf8'));
-  assert.match(qs[0], /^\(P2\) Does the diff do everything its brief's "Done when" lines say/);
-  assert.match(qs[1], /^\(P2\) Is every statement the diff makes true/);
+// The Thermos audits answer per area of their rubric, and the rubric is the vendored upstream file.
+test('the Thermos question files: one question per area of the vendored rubric', async () => {
+  const { questions } = await import('./gate.mjs');
+  const review = questions(readFileSync(join(KIT, 'templates/review/thermo-review.md'), 'utf8'));
+  assert.equal(review.length, 5);
+  assert.match(review[0], /^\*\*Bugs\./);
+  const quality = questions(readFileSync(join(KIT, 'templates/review/thermo-quality.md'), 'utf8'));
+  assert.equal(quality.length, 7);
+  for (const f of ['thermo-nuclear-review', 'thermo-nuclear-code-quality-review']) assert.ok(existsSync(join(KIT, 'vendor/thermos', f, 'SKILL.md')));
 });
 
 test('enforcement: the checklist review must run on every PR', () => {
@@ -345,7 +293,7 @@ test('enforcement: the rules layer is on through a gate_pr command step, and cou
   let out = r.lc(['enforcement']);
   assert.match(line(out.stdout, /^mechanical rules/), /\boff\b.*gate_pr command step/);
   assert.match(out.stdout, /configured layer\(s\) off:[^]*\.agents\/rules\.yaml, against/);
-  writeFileSync(join(r.repo, '.agents/project.yaml'), yaml.replaceAll('$STATE', `${r.repo}/state`).replace('gate_phase:', '  rules: command lc-rules check --base $LC_GATE_BASE\ngate_phase:'));
+  writeFileSync(join(r.repo, '.agents/project.yaml'), yaml.replaceAll('$STATE', `${r.repo}/state`).replace('gate_pr:\n', 'gate_pr:\n  rules: command lc-rules check --base $LC_GATE_BASE\n'));
   out = r.lc(['enforcement']);
   assert.match(line(out.stdout, /^mechanical rules/), /\bon: gate_pr rules\b/);
 });
@@ -362,9 +310,9 @@ test('the template rules step fails a candidate that breaks a rule, judged by th
   assert.match(out.stdout, /rules\s+command\s+FAIL/, out.stdout + out.stderr);
 });
 
-// --strict tells the truth: with no host and only observing modes, nothing refuses.
+// --strict tells the truth: with no host and only an observing mode, nothing refuses.
 test('enforcement --strict: exit 1 when no layer can refuse, naming what is missing', () => {
-  const yaml = YAML.replace(/ci:\n {2}required_checks: .*\n/, '').replace('gate_pr_mode: enforce\ngate_pr_plan: enforce\n', 'gate_pr_mode: observe 3\ngate_pr_plan: observe 3\n');
+  const yaml = YAML.replace(/ci:\n {2}required_checks: .*\n/, '').replace('gate_pr_mode: enforce\n', 'gate_pr_mode: observe\n');
   const r = repoWith(yaml);
   const out = r.lc(['enforcement', '--strict']);
   assert.equal(out.status, 1, out.stdout);
@@ -372,10 +320,9 @@ test('enforcement --strict: exit 1 when no layer can refuse, naming what is miss
   const row = line(out.stdout, /^refusal/);
   assert.match(row, /\boff: nothing refuses/);
   assert.match(row, /ci\.required_checks is not set/);
-  assert.match(row, /gate_pr_mode observing, 0 of 3/);
-  assert.match(row, /gate_pr_plan observing, 0 of 3/);
+  assert.match(row, /gate_pr_mode observe \(observe only logs\)/);
   // An enforcing mode with its hook on can refuse, host or not.
-  writeFileSync(join(r.repo, '.agents/project.yaml'), yaml.replaceAll('$STATE', `${r.repo}/state`).replace('gate_pr_mode: observe 3', 'gate_pr_mode: enforce'));
+  writeFileSync(join(r.repo, '.agents/project.yaml'), yaml.replaceAll('$STATE', `${r.repo}/state`).replace('gate_pr_mode: observe', 'gate_pr_mode: enforce'));
   const on = r.lc(['enforcement', '--strict']);
   assert.match(line(on.stdout, /^refusal/), /\bon: .*Claude Code plugin hook/);
   assert.equal(on.status, 0, on.stdout);
@@ -383,7 +330,7 @@ test('enforcement --strict: exit 1 when no layer can refuse, naming what is miss
 
 // No CI host, stated as `ci.enforcement: none`: the host rows say so, not "set ci.required_checks".
 test('enforcement: ci.enforcement none is named as no CI host', () => {
-  const yaml = YAML.replace(/ci:\n {2}required_checks: .*\n/, 'ci:\n  enforcement: none\n').replace('gate_pr_mode: enforce\ngate_pr_plan: enforce\n', 'gate_pr_mode: observe 3\ngate_pr_plan: observe 3\n');
+  const yaml = YAML.replace(/ci:\n {2}required_checks: .*\n/, 'ci:\n  enforcement: none\n').replace('gate_pr_mode: enforce\n', 'gate_pr_mode: observe\n');
   const out = repoWith(yaml).lc(['enforcement']).stdout;
   assert.match(line(out, /required checks on/), /off: no CI host \(ci\.enforcement: none\)/);
   assert.doesNotMatch(out, /set ci\.required_checks|ci\.required_checks is not set/);
@@ -419,7 +366,6 @@ test('the merge hook checks git merge of a branch into the default branch', () =
   r.git('git checkout -q main');
   assert.equal(r.lc(['record', 'pr', 'feat', 'review', 'na', '--reason', 'empty', '--candidate', 'feat']).status, 0);
   assert.equal(hook('git merge feat').status, 0);
-  assert.equal(JSON.parse(readFileSync(join(r.repo, 'state/gates/pr/feat/merged.json'), 'utf8')).complete, true);
   const hooks = readFileSync(join(KIT, 'hooks/hooks.json'), 'utf8');
   assert.match(hooks, /Bash\(git merge \*\)/);
   assert.match(hooks, /Bash\(git -C \* merge \*\)/);
@@ -457,22 +403,6 @@ test('the pr-body check: needs the section when the diff touches the paths, and 
   assert.match(narrowed.stdout, /PROTECTED GATE CHANGE: \.agents\/project\.yaml/);
 });
 
-test('the phase check through from-base.sh uses the base step list', () => {
-  const yaml = 'docs:\n  roadmap: road.md\n  phase_records: records/\ngate_phase:\n  build: command true\n  lint: command true\n';
-  const r = repoWith(yaml, { layers: false });
-  r.git(`mkdir -p .agents/ci && cp ${KIT}templates/ci/from-base.sh .agents/ci/ && git add -A && git commit -qm ci`);
-  const base = r.git('git rev-parse HEAD');
-  const row = (step) => `| ${step} | command | PASS | ${base} | lc-gate | \`true\` exit 0 |  |`;
-  mkdirSync(join(r.repo, 'records'));
-  writeFileSync(join(r.repo, 'records/one.md'), `# Phase record: one\n\n- **Gate:** phase one\n- **Candidate:** ${base}\n\n| Step | Kind | Status | Commit | By | Evidence | Reason |\n| --- | --- | --- | --- | --- | --- | --- |\n${row('build')}\n`);
-  writeFileSync(join(r.repo, 'road.md'), '## One (done) [record](records/one.md)\n');
-  r.git(`sed -i '/lint/d' .agents/project.yaml && git add -A && git commit -qm "one done, lint dropped"`);
-  const out = spawnSync('bash', ['.agents/ci/from-base.sh', base, 'HEAD', KIT, 'phase'], { cwd: r.repo, encoding: 'utf8' });
-  assert.equal(out.status, 1);
-  assert.match(out.stderr, /lint: missing/);
-  assert.match(out.stdout, /PROTECTED GATE CHANGE/);
-});
-
 test('enforcement names keys the 1.8 upgrade drops, without failing on them', () => {
   const repo = mkdtempSync(join(tmpdir(), 'lc-enf-'));
   sh(repo, 'git init -q -b main && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m one');
@@ -486,4 +416,38 @@ test('enforcement names keys the 1.8 upgrade drops, without failing on them', ()
   const after = run();
   assert.match(after.stdout, /note: gate\.run, merge\.candidate are no longer read; drop them from \.agents\/project\.yaml \(docs\/upgrading\.md, 1\.8\)/);
   assert.equal(after.status, before.status);
+});
+
+// The stage exit. gate_pr judges only what enters the default branch; a PR into a stage branch
+// lands on the host's checks and its swarm verdict.
+test('the merge hook lets a PR into a stage branch through and refuses one into main', () => {
+  const r = repoWith('handoff_dir: $STATE\ngate_pr_mode: enforce\ngate_pr:\n  thermo-review: session q.md\n', { layers: false });
+  const hook = (command) =>
+    spawnSync(process.execPath, [GATE, 'hook'], { cwd: r.repo, encoding: 'utf8', env: { ...process.env, LC_GATE_STEP: '', PATH: `${r.gh.dir}:/usr/bin:/bin` }, input: JSON.stringify({ tool_name: 'Bash', cwd: r.repo, tool_input: { command } }) });
+  r.git('git checkout -q -b pr-1 main && git commit -q --allow-empty -m work');
+  const head = r.git('git rev-parse HEAD');
+  r.gh.set('view.json', JSON.stringify({ headRefName: 'pr-1', headRefOid: head, baseRefName: 'stage/pay' }));
+  const staged = hook('gh pr merge pr-1 --squash');
+  assert.equal(staged.status, 0, staged.stderr);
+  assert.doesNotMatch(staged.stdout, /observe mode/);
+  r.gh.set('view.json', JSON.stringify({ headRefName: 'stage/pay', headRefOid: head, baseRefName: 'main' }));
+  const exit = hook('gh pr merge stage/pay');
+  assert.equal(exit.status, 2, exit.stdout);
+  assert.match(exit.stderr, /thermo-review/);
+});
+
+test('enforcement: without a review checklist, any gate_pr session step is the review route', () => {
+  const r = repoWith('handoff_dir: $STATE\ngate_pr_mode: enforce\npaths:\n  code: src/**\ngate_pr:\n  thermo-review: session q.md if code\n', { layers: false });
+  assert.match(line(r.lc(['enforcement']).stdout, /^review\s/), /every gated PR reviewed: a session step.*\bon: gate_pr thermo-review/);
+  const none = repoWith('handoff_dir: $STATE\ngate_pr_mode: enforce\ngate_pr:\n  ci: command true\n', { layers: false });
+  assert.match(line(none.lc(['enforcement']).stdout, /^review\s/), /\boff: gate_pr has no session step/);
+});
+
+test('protect --branch: a stage branch gets the same required checks', () => {
+  const r = repoWith();
+  r.gh.set('api.err', 'gh: Branch not protected (HTTP 404)\n');
+  const out = r.lc(['protect', '--branch', 'stage/pay', '--yes']);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(r.gh.log(), /api -X PUT repos\/\{owner\}\/\{repo\}\/branches\/stage%2Fpay\/protection --input -/);
+  assert.match(out.stdout, /set: stage\/pay is protected/);
 });

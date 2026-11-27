@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# The baseline tools the lifecycle expects on a machine, and which are missing (docs/tools.md).
+# Usage: lc-tools            one line per tool: ok or MISSING, with the install line
+#        lc-tools --strict   also exit 1 when a tool of an optional group is missing
+# Exit 1 when a core tool is missing. Run it in the project: bombadil is looked up in node_modules too.
+set -uo pipefail
+strict=0; [[ ${1:-} == --strict ]] && strict=1
+missing_core=0; missing_opt=0
+row() { # row <group> <name> <probe command> <install hint>
+  if eval "$3" >/dev/null 2>&1; then printf '%-8s %-10s ok\n' "$1" "$2"
+  else printf '%-8s %-10s MISSING  %s\n' "$1" "$2" "$4"; if [[ $1 == core ]]; then missing_core=1; else missing_opt=1; fi; fi
+}
+row core   git      'git --version'   'your package manager; 2.36 or later'
+row core   node     'node --version'  'https://nodejs.org, 18 or later'
+row core   tmux     'tmux -V'         'your package manager'
+row core   gh       'gh --version'    'https://cli.github.com'
+row core   claude   'claude --version' 'https://claude.com/claude-code'
+row tla    mise     'mise --version'  'curl https://mise.run | sh   (pstack statechart installs its pinned Java and TLC through it)'
+row lean   elan     'elan --version'  'curl https://elan.lean-lang.org/elan-init.sh -sSf | sh   (installs lean and lake)'
+row ui     bombadil 'bombadil --version || test -x node_modules/.bin/bombadil' 'npm install --save-dev @antithesishq/bombadil   (in the project)'
+row ui     playwright 'test -x node_modules/.bin/playwright || playwright --version' 'npm install --save-dev @playwright/test   (in the project)'
+row pstack bun      'bun --version'   'https://bun.sh   (pstack Babysit: its pull request watcher)'
+[[ $missing_core -eq 1 ]] && exit 1
+[[ $strict -eq 1 && $missing_opt -eq 1 ]] && exit 1
+exit 0

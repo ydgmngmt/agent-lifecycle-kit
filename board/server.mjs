@@ -11,13 +11,12 @@
 //   acceptance criteria from the phase's acceptance file, linked from its roadmap section;
 //   PR state and CI from `gh pr list`; sessions from tmux (sessions.tmux_session).
 // What stays in <data dir>/state.json, because no file holds it: a headline, per-phase notes,
-// journey and criterion status not yet shown by a phase run, extra items, and a note per session.
+// journey and criterion status not yet shown by a gate run, extra items, and a note per session.
 // Questions for the owner: <data dir>/questions.json; answers are appended to answers.jsonl.
 // Gates: one panel per gate run most recently, a row per step of gate_<gate> with its record (lc-gate).
 // Sessions lc-spawn started: <data dir>/spawned.tsv. A session's note defaults to its brief's title, and
 // its branch finds its PR; a window lc-spawn did not start shows them from its prompt and pane path.
 // GET /api/stale lists what is probably out of date (staleList); board/cli.mjs changes state.json.
-// Read afterwards: <data dir>/read-afterwards.jsonl, the owner steps the lead set aside (lc-gate record).
 // Each line added to answers.jsonl is told to the lead (lc-tell lead; answers.told keeps the offset).
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
@@ -321,16 +320,6 @@ const answers = async () =>
     }
   });
 
-// The owner steps the lead recorded N/A, newest first: { gate, id, step, commit, reason, by, at }.
-const afterwards = async () =>
-  (await text(join(dataDir, 'read-afterwards.jsonl'))).split('\n').filter(Boolean).flatMap((l) => {
-    try {
-      return [JSON.parse(l)];
-    } catch {
-      return [];
-    }
-  }).reverse();
-
 // Tells the lead each answer added to answers.jsonl since the offset in answers.told (from the end of
 // the file the first time), with lc-tell lead, as session "board", one at a time: the offset moves past
 // a line only once its tell went through, so a failed one is tried again (on the next change, or every
@@ -445,7 +434,6 @@ async function snapshot() {
     spawned: [...spawns.keys()],
     sessions: live.map(({ title, ...x }) => ({ ...x, note: state.sessions?.[x.name] || title })),
     gates: gates(),
-    afterwards: await afterwards(),
     questions: questions.map((q) => ({ ...q, answer: answered.get(q.id) ?? null, outcome: state.outcomes?.[q.id] ?? null })),
     at: new Date().toISOString(),
   };
@@ -471,7 +459,7 @@ function staleList(d) {
     const progress = pr?.state === 'OPEN' || (!pr && it.state === 'progress');
     if (!progress || !it.owner) continue;
     const s = live.get(it.owner);
-    // Only a session lc-spawn started can be closed; an owner that is a person or the orchestrator is not.
+    // Only a session lc-spawn started can be closed; an owner that is a person or the lead is not.
     if (!s && d.spawned.includes(it.owner)) out.push({ kind: 'item', id: it.label, why: `in progress, but session ${it.owner} is closed` });
     else if (s?.state === 'idle' && pr?.state !== 'OPEN') out.push({ kind: 'item', id: it.label, why: `in progress with no open PR, and session ${it.owner} is idle` });
   }

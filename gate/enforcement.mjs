@@ -1,16 +1,16 @@
 // What makes this repository's gates binding, layer by layer (`lc-gate enforcement`), and the host's
 // branch protection from ci.required_checks (`lc-gate protect`). Read with gate.mjs, which runs both.
 //
-// Five strengths, weakest last: the host refuses (required checks on a protected default branch,
+// Four strengths, weakest last: the host refuses (required checks on a protected default branch,
 // administrators included); a local hook refuses (earlier and cheaper); an independent record (the
-// runner from a command's exit, a CI run or the host's checks, a separate session, the owner); the author's own word,
-// which is never a gate step. Every gh call has a timeout (LC_GATE_GH_TIMEOUT ms, default 20s).
+// runner from a command's exit, a CI run or the host's checks, a separate session); the author's own
+// word, which is never a gate step. Every gh call has a timeout (LC_GATE_GH_TIMEOUT ms, default 20s).
 import { spawnSync } from 'node:child_process';
-import { accessSync, constants, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
+import { join } from 'node:path';
 import { loadConfig } from '../board/config.mjs';
-import { KIT, die, exec, gateMode, globRe, modeText, parseSteps } from './gate.mjs';
+import { KIT, die, exec, gateMode, globRe, parseSteps } from './gate.mjs';
 import { BASELINE, RULES } from '../rules/rules.mjs';
 
 const words = (v) => String(v ?? '').split(/[\s,]+/).filter(Boolean);
@@ -93,32 +93,11 @@ function pluginOn(repo) {
   return on;
 }
 
-// The pre-commit hook git runs here, if it calls lc-gate: { on, path, note }.
-function gitHook(repo) {
-  const hooksPath = git(repo, 'config', 'core.hooksPath');
-  const dir = hooksPath || git(repo, 'rev-parse', '--git-path', 'hooks');
-  const file = resolve(repo, dir, 'pre-commit');
-  // The hook file as a rule file of the repository: its path in the repo, when it lives there.
-  const inRepo = relative(repo, file);
-  const path = hooksPath && !inRepo.startsWith('..') ? inRepo : '';
-  const shown = path || file;
-  if (!existsSync(file)) return { on: false, path, note: hooksPath ? `${shown} is missing` : 'core.hooksPath is not set and .git/hooks has no pre-commit' };
-  try {
-    accessSync(file, constants.X_OK);
-  } catch {
-    return { on: false, path, note: `${shown} is not executable` };
-  }
-  if (!readFileSync(file, 'utf8').includes('lc-gate')) return { on: false, path, note: `${shown} does not call lc-gate plan-check` };
-  return { on: true, path, shown };
-}
-
 const BY = {
   command: 'the runner, from the command\'s exit at the head',
   workflow: 'the runner, from the CI run titled with the candidate',
   checks: 'the runner, from the host\'s check runs on the exact commit',
   session: 'a separate session lc-gate run starts',
-  here: 'the author',
-  owner: 'the owner, on the board',
 };
 
 // The rows of the table: { layer, what, by, refuses, state, configured }. `state` starts with on, off
@@ -129,10 +108,7 @@ function rows(repo) {
   const out = [];
   const add = (layer, what, by, refuses, state, configured = true) => out.push({ layer, what, by, refuses, state, configured });
   const prMode = gateMode(cfg, 'gate_pr_mode');
-  const planMode = gateMode(cfg, 'gate_pr_plan');
   const prSteps = parseSteps(c, 'pr');
-  const phaseSteps = parseSteps(c, 'phase');
-  const planned = prSteps.filter((s) => s.plan);
   const checks = words(c['ci.required_checks']);
   const flows = workflowFiles(repo);
   // With no check required: no CI host stated (ci.enforcement: none), or the key unset.
@@ -162,32 +138,22 @@ function rows(repo) {
 
   // The local hooks.
   const L = 'local hook refuses';
-  const hook = gitHook(repo);
-  add(L, 'git pre-commit hook (core.hooksPath)', 'git, for every agent and person', 'a commit of planned files without the plan', hook.on ? `on: ${hook.shown}` : `off: ${hook.note}`, planned.length > 0 && planMode.mode !== 'off');
-  add(L, 'Claude Code plugin hook', 'Claude Code, on this machine', 'an edit or commit without the plan; gh pr merge, or git merge into the default branch, without the records (lc-gate merge refuses the same itself)', pluginOn(repo) ? 'on' : 'off: the agent-lifecycle-kit plugin is not enabled in Claude Code settings', prSteps.length > 0 && prMode.mode !== 'off');
+  add(L, 'Claude Code plugin hook', 'Claude Code, on this machine', 'gh pr merge, or git merge into the default branch, without the records (lc-gate merge refuses the same itself)', pluginOn(repo) ? 'on' : 'off: the agent-lifecycle-kit plugin is not enabled in Claude Code settings', prSteps.length > 0 && prMode.mode !== 'off');
   const refusesBy = (m, what) => (m.mode === 'enforce' ? what : m.mode === 'off' ? 'nothing: off' : 'nothing yet: logged and told (observe)');
-  add('mode', 'gate_pr_mode', 'the project file', refusesBy(prMode, 'lc-gate merge, and the hook at gh pr merge or git merge'), modeText(prMode), false);
-  add('mode', 'gate_pr_plan', 'the project file', refusesBy(planMode, 'the hooks on edit and commit'), modeText(planMode), false);
+  add('mode', 'gate_pr_mode', 'the project file', refusesBy(prMode, 'lc-gate merge, and the hook at gh pr merge or git merge'), prMode.mode, false);
 
   // The steps.
   for (const s of prSteps) {
-    const own = s.kind === 'here';
     const refuses = prMode.mode === 'off' ? 'nothing: gate_pr_mode is off' : `lc-gate merge and the hook at gh pr merge${prMode.mode === 'observe' ? ' (observe: logged only)' : ''}`;
-    add(own ? 'author\'s own word' : 'independent record', `gate_pr ${s.id}: ${s.kind}${s.arg ? ` ${s.arg}` : ''}${s.if ? ` if ${s.if}` : ''}${s.plan ? ' plan' : ''}${s.after ? ` after ${s.after.join(',')}` : ''}`, BY[s.kind], refuses,
-      own ? 'off: judges the author\'s own work; make it a session or command step' : 'on');
-    if (s.plan) add(L, `gate_pr ${s.id} plan, before the first edit and commit`, 'the author, before the work: a plan, which the step then checks', refusesBy(planMode, 'the plugin hook on edit and commit, and the git pre-commit hook'), planMode.mode === 'off' ? 'off: gate_pr_plan is off' : 'on', false);
-  }
-  const phaseCheck = flows.find((w) => /check phase --diff|from-base\.sh\S*\s.*\bphase\b/.test(w.text));
-  for (const s of phaseSteps) {
-    add(s.kind === 'here' ? 'lead\'s record' : 'independent record', `gate_phase ${s.id}: ${s.kind}${s.arg ? ` ${s.arg}` : ''}`, s.kind === 'here' ? 'the lead' : BY[s.kind],
-      'lc-gate check phase --diff in CI, once the roadmap marks the phase done', phaseCheck ? 'on' : 'off: no workflow runs lc-gate check phase --diff', Boolean(checks.length));
+    add('independent record', `gate_pr ${s.id}: ${s.kind}${s.arg ? ` ${s.arg}` : ''}${s.if ? ` if ${s.if}` : ''}${s.after ? ` after ${s.after.join(',')}` : ''}`, BY[s.kind], refuses, 'on');
   }
 
   // Every PR reviewed, a prose-only diff included: the checklist's session step with no `if` (by kind of diff).
   const list = c['docs.review_checklist']?.split('#')[0];
-  const reviewer = list && prSteps.find((s) => s.kind === 'session' && s.arg === list && !s.if);
-  add('review', 'every PR reviewed: the checklist session', BY.session, 'a false statement or a broken project rule, a prose-only diff included',
-    reviewer ? `on: gate_pr ${reviewer.id}, the checklist session` : `off: no gate_pr step without an \`if\` that is ${list ? `\`session ${list}\`` : 'the checklist session (set docs.review_checklist)'}`, prSteps.length > 0);
+  // Without a checklist (a stage exit's gate_pr): any session step, which never is the author.
+  const reviewer = list ? prSteps.find((s) => s.kind === 'session' && s.arg === list && !s.if) : prSteps.find((s) => s.kind === 'session');
+  add('review', list ? 'every PR reviewed: the checklist session' : 'every gated PR reviewed: a session step', BY.session, 'a false statement or a broken project rule, a prose-only diff included',
+    reviewer ? `on: gate_pr ${reviewer.id}${list ? ', the checklist session' : ''}` : `off: ${list ? `no gate_pr step without an \`if\` that is \`session ${list}\`` : 'gate_pr has no session step'}`, prSteps.length > 0);
 
   // The mechanical rules (lc-rules), once the project has a rules file: in CI, or as a gate_pr command
   // step, which binds without a CI host.
@@ -204,10 +170,9 @@ function rows(repo) {
   const listed = protectedGlobs(repo);
   const ruleFiles = new Set(['.agents/project.yaml']);
   if (hasRules) ruleFiles.add(RULES).add(BASELINE);
-  if (hook.path) ruleFiles.add(hook.path);
   for (const w of flows) if (checks.some((n) => definesJob(w.text, n)) || /lc-gate|from-base\.sh/.test(w.text)) ruleFiles.add(w.path);
   if (existsSync(join(repo, '.agents/ci'))) for (const f of readdirSync(join(repo, '.agents/ci'))) ruleFiles.add(`.agents/ci/${f}`);
-  for (const s of [...prSteps, ...phaseSteps]) for (const w of words(s.arg)) if (/[/.]/.test(w) && existsSync(join(repo, w))) ruleFiles.add(w);
+  for (const s of prSteps) for (const w of words(s.arg)) if (/[/.]/.test(w) && existsSync(join(repo, w))) ruleFiles.add(w);
   for (const k of ['pr_body.shapes', 'docs.stack_decisions', 'docs.stack_tools', 'docs.stack_exceptions']) {
     const f = c[k]?.split('#')[0];
     if (f && existsSync(join(repo, f))) ruleFiles.add(f);
@@ -223,12 +188,11 @@ function rows(repo) {
   const refusers = [
     hostOn && 'the host',
     prSteps.length && prMode.mode === 'enforce' && plugin && 'the Claude Code plugin hook at merge',
-    planned.length && planMode.mode === 'enforce' && (plugin || hook.on) && `the ${[plugin && 'Claude Code plugin', hook.on && 'git pre-commit'].filter(Boolean).join(' and ')} hook on edits and commits`,
   ].filter(Boolean);
   const hostWhy = () => (!checks.length ? noChecks : out.find((r) => r.layer === H && r.configured && !r.state.startsWith('on'))?.state);
-  const modeWhy = (m) => (m.mode === 'enforce' ? `${m.key} enforce, but its hook is off` : `${m.key} ${modeText(m)}${m.mode === 'observe' ? ' (observe only logs)' : ''}`);
+  const modeWhy = (m) => (m.mode === 'enforce' ? `${m.key} enforce, but its hook is off` : `${m.key} ${m.mode}${m.mode === 'observe' ? ' (observe only logs)' : ''}`);
   add('refusal', 'some layer refuses a change without its records', 'the layers above', 'everything: without one, the gates only log',
-    refusers.length ? `on: ${refusers.join('; ')}` : `off: nothing refuses. No host (${hostWhy()}); ${modeWhy(prMode)}; ${planned.length ? modeWhy(planMode) : 'no planned step'}. Set a mode to enforce, or the host's required checks`);
+    refusers.length ? `on: ${refusers.join('; ')}` : `off: nothing refuses. No host (${hostWhy()}); ${modeWhy(prMode)}. Set a mode to enforce, or the host's required checks`);
   return out;
 }
 
@@ -291,8 +255,8 @@ function planRefused(branch, msg) {
 export function protect(repo, _pos, flags) {
   const checks = words(loadConfig(repo).conf['ci.required_checks']);
   if (!checks.length) die('set ci.required_checks in .agents/project.yaml: the CI job names the default branch requires, separated by spaces');
-  const branch = defaultBranch(repo);
-  const path = `repos/{owner}/{repo}/branches/${branch}/protection`;
+  const branch = typeof flags.branch === 'string' && flags.branch ? flags.branch : defaultBranch(repo);
+  const path = `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}/protection`;
   const now = gh(repo, ['api', path]);
   if (now.plan) return planRefused(branch, now.error);
   if (now.error && !now.none) die(`can't read the protection of ${branch}: ${now.error}`);
