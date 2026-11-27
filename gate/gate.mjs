@@ -577,6 +577,16 @@ async function walk(repo, [gate, idArg], flags) {
   const id = idArg ?? branchId(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD'));
   const g = load(repo, gate, id);
   const sha = flags.candidate ? verify(repo, flags.candidate) : verify(repo, 'HEAD');
+  if (!flags.candidate) {
+    const host = exec('gh', ['pr', 'view', id, '--json', 'headRefOid'], { cwd: repo, timeout: GH_TIMEOUT, ok: true });
+    let oid = null;
+    try {
+      oid = host.status === 0 ? JSON.parse(host.stdout).headRefOid : null;
+    } catch {
+      oid = null;
+    }
+    if (oid && oid !== sha) die(`the pull request's head on the host is ${oid.slice(0, 12)}, but this checkout is at ${sha.slice(0, 12)}: pull the branch (git pull --ff-only), or pass --candidate ${oid.slice(0, 12)}; nothing was run`);
+  }
   const { base, note, branch } = flags.base ? { base: verify(repo, flags.base), branch: flags.base } : prBase(repo, g.cfg, id, sha);
   // A PR's records are judged against its base branch: when it moved (a retarget), the runner's own
   // `if` N/As are decided again, and lc-gate merge refuses until a walk has seen the new base.
