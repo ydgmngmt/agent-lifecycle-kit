@@ -80,6 +80,7 @@ The full usage is at the top of [`gate/gate.mjs`](../gate/gate.mjs).
 | `lc-gate enforcement [--strict] [--md]` | What makes each step binding here, layer by layer, and whether each layer is on |
 | `lc-gate protect [--branch <name>] [--yes]` | Branch protection from `ci.required_checks`, on the default branch or on the named one (a stage branch) |
 | `lc-pstack path` · `check` · `diff` | The installed pstack's folder; whether it is the version `pstack.lock` pins and upstream still matches what the fork and the vendored files started from; what moved |
+| `lc-tools [--strict]` | The baseline tools ([tools](tools.md)): present or missing, with the install line; exit 1 when a core tool is missing |
 | `lc-criteria <acceptance file> <folder>…` | Exit 1 listing each acceptance criterion no flow script under the folders names |
 | `lc-rules check [--base <sha>]` | Exit 1 on a finding of `.agents/rules.yaml` beyond `.agents/rules-baseline.json`; with `--base`, the base commit's copy judges ([`rules/rules.mjs`](../rules/rules.mjs)) |
 | `lc-rules selftest` | Each rule fails its red example and passes its green one |

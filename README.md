@@ -74,7 +74,7 @@ Per stage: the lead plans, cuts the stage branch and starts an owner session per
 
 - [Enforcement](docs/enforcement.md): the model, the modes, the step syntax, the commands
 - [Upgrading](docs/upgrading.md): each release since 0.8
-- [Machine-specific pieces](docs/machine.md)
+- [Machine-specific pieces](docs/machine.md) and the [baseline tools](docs/tools.md)
 - [Proof](docs/proof.md): method, cases and limits
 - [The lifecycle skill](skills/lifecycle/SKILL.md): steps, roles and gates
 - [adlc-mode](skills/adlc-mode/SKILL.md), the fork of pstack's poteto-mode, and [where it differs](skills/adlc-mode/DIVERGENCES.md)

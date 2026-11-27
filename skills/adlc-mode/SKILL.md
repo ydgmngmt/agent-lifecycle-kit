@@ -29,6 +29,7 @@ The remaining triggers live only here:
 - A screen added or changed → its properties in the project's property-based UI tests (`docs.testing`): what must hold whatever the user does next.
 - Trunk, wherever a playbook says it → the stage branch (`stage.branch`), never the default branch. Only the stage exit merges into the default branch.
 - A control skill, wherever a playbook names one → the project's verification skill (`verify-<app>` in `.claude/skills/`, `docs.testing`). Run its flow scripts first. Drive by hand only where no script reaches, then add the script.
+- A tool a skill needs is missing (mise for statechart, elan for Lean, Bombadil, Playwright) → install the kit's baseline for it (`lc-tools` prints the line; the kit's `docs/tools.md` says why that one), say so in your report, and carry on. Never substitute a hand-rolled stand-in.
 - Cursor's `/loop` → Claude Code's `/loop`. A question only the owner can answer → `lc-board ask` (the `board` skill), never a dialog left open.
 - Prose, your reply included → **unslop**. Docs, PR descriptions, commit messages → **technical-writing**.
 - Before commit → deslop: read [the vendored skill](../../vendor/cursor-team-kit/deslop/SKILL.md) and follow it against the stage branch. Before review → **no-comments**.

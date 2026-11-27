@@ -12,6 +12,7 @@ The rule for a change: pstack is used as written unless the owner decided otherw
 | `SKILL.md` | A correction runs **correct** in the same fix, into `lc-rules` and the rule table; no comments in new code; a proof for an algorithm with a property over every input; properties for a changed screen | Owner's decision after the author's talk "All Code Is Slop (Except Mine)": every correction becomes a deterministic check. Upstream leaves `/correct` to the operator |
 | `SKILL.md` | "Always pause" covers a change that loosens a `protected_files` file | The kit's rule: rule files change only in a PR the owner reads; adding a rule must not wait |
 | `playbooks/opening-a-pr.md` | `## Verification` links the artifacts: recording or screenshot, statechart, proof output | Owner's decision: review by artifacts, as the talk describes |
+| `SKILL.md` | A missing tool is installed from the kit's baseline list | Upstream assumes mise and its own team's tools are present |
 | `SKILL.md` | Trunk is the stage branch; only the stage exit merges into the default branch | The kit's stage exit gates the default branch |
 | `SKILL.md` | A control skill is the project's verification skill, its flow scripts first | `control-ui` and `control-cli` are Cursor's; scripts cost no model tokens on a green run |
 | `SKILL.md` | deslop is read from the kit's vendored copy | `cursor-team-kit` is not installable in Claude Code |
