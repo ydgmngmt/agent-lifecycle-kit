@@ -68,7 +68,7 @@ Per stage: the lead plans, cuts the stage branch and starts an owner session per
 
 - Sessions that share the owner's host login can do whatever the owner can, including changing the protection.
 - Records are unsigned files: a session that forges its environment or writes a record by hand is not caught, and a record proves a review ran, not that it was good.
-- The hooks hold only where they are installed: the plugin where it is enabled, the git hook where `core.hooksPath` is set.
+- The hooks hold only where they are installed: the plugin where it is enabled.
 
 ## More
 

@@ -123,7 +123,7 @@ const commands = {
   async journey() {
     const [jid] = pos;
     if (!jid) fail('usage: journey <id> [--status s] [--note text] [--evidence url]');
-    if (DONE.test(flag('status') ?? '') && !flag('evidence')) fail('a journey is done only with evidence (a phase run or a live check): pass --evidence');
+    if (DONE.test(flag('status') ?? '') && !flag('evidence')) fail('a journey is done only with evidence (a gate run or a live check): pass --evidence');
     const { id } = await phaseOf();
     const s = state();
     const j = (((s.phases[id] ??= {}).journeys ??= {})[jid] ??= {});

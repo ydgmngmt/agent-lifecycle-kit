@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Append one line to the phase's running log (board.running_log), stamped with the clock and the sender
+# Append one line to the stage's running log (board.running_log), stamped with the clock and the sender
 # (LC_SESSION, else "lead"): "- <date time>: <line> (<sender>)". A line the owner must act on starts with
 # FOR THE OWNER.
 # Usage: lc-log "<line>"

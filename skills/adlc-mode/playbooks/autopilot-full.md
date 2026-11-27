@@ -14,7 +14,7 @@ Trunk is the stage branch. The queue is the stage's plan file: one item per PR s
 4. **Swarm-verify once.** A full swarm runs once, at the code-ready head. Another full swarm runs only for new behavior, a redesign, or a large new diff. A rebase, a merge-conflict resolution, or a minor fix gets a single verifier at the new head, and a wording-only change gets none. Fan out independent verifiers at the code-ready SHA per the **swarm** skill, as your own subagents. A full swarm is two lanes:
 
    - **Run lane**, on the `swarm workers` model. It re-runs the project's required checks (`profiles.pr`, `lc-rules check`) and the verification skill's flow scripts that cover the diff, and proves the load-bearing behavior live on the real surface. A green script run needs no reading. On a red one it reads the trace, screenshot and logs and reports `ISSUES`.
-   - **Audit lane**, on the `judgment and prose` model. It audits the diff against the PR's section of the plan and checks every receipt in the merge-ready report.
+   - **Audit lane**, on Opus at high effort (`model: "opus"`, `effort: "high"`): review runs one step above the build. It audits the diff against the PR's section of the plan and checks every receipt in the merge-ready report.
 
    The single verifier for a rebase or a minor fix is the run lane. The verdict is not clean without the run lane's live proof, or before the audit lane has checked the merge-ready report's receipts, because no lane trusts a claim it has not checked. Post the verdict on the PR as a comment: `PASS`, `PASS+NOTES` or `FAIL`, with the SHA it covers.
 

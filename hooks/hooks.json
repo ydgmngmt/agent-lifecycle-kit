@@ -1,5 +1,5 @@
 {
-  "description": "The gates' tripwires through lc-gate hook: the PR gate's records at merge, gh pr merge or git merge into the default branch (gate_pr_mode), and the plan before the work on every edit and commit (gate_pr_plan), in .agents/project.yaml.",
+  "description": "The gates' tripwires through lc-gate hook: the PR gate's records at merge, gh pr merge or git merge into the default branch (gate_pr_mode), in .agents/project.yaml.",
   "hooks": {
     "PreToolUse": [
       {
@@ -34,28 +34,6 @@
             "if": "Bash(git -C * merge *)",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/lc-gate\" hook",
             "timeout": 90
-          },
-          {
-            "type": "command",
-            "if": "Bash(git commit *)",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/lc-gate\" hook",
-            "timeout": 30
-          },
-          {
-            "type": "command",
-            "if": "Bash(git -C * commit *)",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/lc-gate\" hook",
-            "timeout": 30
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/lc-gate\" hook",
-            "timeout": 30
           }
         ]
       }

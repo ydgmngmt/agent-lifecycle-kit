@@ -18,7 +18,7 @@ The rule for a change: pstack is used as written unless the owner decided otherw
 | `SKILL.md` | deslop is read from the kit's vendored copy | `cursor-team-kit` is not installable in Claude Code |
 | `SKILL.md` | `/loop` is Claude Code's; the owner is asked on the board | Cursor's loop and question tool don't exist here; an open dialog stops the watchdog |
 | `SKILL.md` | show-me-your-work's cross-model review of the trail only when critical | A second vendor is not available in Claude Code, and it is a panel seat |
-| `SKILL.md` | The swarm's audit lane runs on the `judgment and prose` model | Owner's decision: scripts on Sonnet, judgement on Opus |
+| `SKILL.md` | The swarm's audit lane runs on Opus at high effort | Owner's decision: scripts on Sonnet, the build on Opus medium, review on Opus high |
 | `playbooks/feature.md` | Step 2 names the statechart; step 4's arena and step 7's interrogate only when critical | As above |
 | `playbooks/autopilot-full.md` | PR owners are `lc-spawn` sessions that report with `lc-tell`; the trail lives in `handoff_dir` | Cursor cloud agents don't exist here; a tmux session is the closest thing that outlives the lead |
 | `playbooks/autopilot-full.md` | A full swarm is two named lanes (run, audit); the verdict is posted on the PR | Owner's decision on lanes and models; the comment is pstack's own Shipping rule |

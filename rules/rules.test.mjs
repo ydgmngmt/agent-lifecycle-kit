@@ -213,9 +213,9 @@ test('the template\'s starter rules, uncommented, pass their own selftest', () =
   assert.deepEqual(parseYaml(tpl), { rules: null });
   const live = tpl.replace(/^# ( {2}.*)$/gm, '$1');
   const decisions = [...live.matchAll(/decision: (\S+)/g)].map((m) => m[1]);
-  assert.equal(decisions.length, 4);
+  assert.equal(decisions.length, 5);
   const r = repo({ '.agents/rules.yaml': live, ...Object.fromEntries(decisions.map((d) => [d.split('#')[0], '# d\n'])) });
   const out = r.lc('selftest');
   assert.equal(out.status, 0, out.stdout + out.stderr);
-  assert.equal(out.stdout.match(/red fails, green passes/g).length, 4);
+  assert.equal(out.stdout.match(/red fails, green passes/g).length, 5);
 });

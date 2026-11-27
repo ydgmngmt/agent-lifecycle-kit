@@ -23,7 +23,7 @@ A fix found at any gate goes back to the build, and is verified by the same rule
 
 ## The stage exit's gate
 
-`gate_pr:` in the project file declares its steps, one line each (`<step>: <kind> <argument> [if <paths key>] [after <step>]`); the order lives there only. With `gate_pr_only: default-branch`, it judges only a pull request into the default branch. `lc-gate` walks the list; each step leaves a record (PASS, FAIL, or N/A with a reason) bound to the candidate commit, and `lc-gate check` refuses while one is missing, stale or failed.
+`gate_pr:` in the project file declares its steps, one line each (`<step>: <kind> <argument> [if <paths key>] [after <step>]`); the order lives there only. It judges only a pull request into the default branch. `lc-gate` walks the list; each step leaves a record (PASS, FAIL, or N/A with a reason) bound to the candidate commit, and `lc-gate check` refuses while one is missing, stale or failed.
 
 | Kind | Who does it |
 | --- | --- |

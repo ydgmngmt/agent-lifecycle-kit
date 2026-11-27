@@ -73,22 +73,17 @@ stage:
 # The stage exit's steps (lc-gate): the gate on the stage branch's pull request into the default
 # branch. A pull request into a stage branch has no steps here: the host's required checks and its
 # swarm verdict (the adlc-mode skill, Autopilot-full) land it. One line per step, in the order they run:
-#   <step>: <kind> <argument> [if <paths key>] [plan] [after <step>[,<step>]]
+#   <step>: <kind> <argument> [if <paths key>] [after <step>[,<step>]]
 # kind: command (the runner runs it) · workflow (a CI workflow file, dispatched with -f candidate=<sha>)
 #       · checks (no argument: the host's ci.required_checks on the exact commit) · session (a spawned
-#       review session; the argument is its question file) · here (done by the session running the
-#       gate; the argument says what) · owner (a board question).
+#       review session; the argument is its question file).
 # `if <key>` runs the step only when the change touches a glob under paths.<key>.
 # `after <step>` starts the step once each named step above holds with PASS or N/A: the checks that
 # cost no model tokens come before the review sessions.
 # Keep " #" and " — " out of a step line: the reader cuts a value there. An argument may not end in
-# `plan`, `if <word>` or `after <word>` (read as the flags): quote it, e.g. bash -c 'terraform plan'.
-# Modes: off | observe (log and tell) | observe <n> | enforce (refuse). `observe <n>` observes until n
-# PRs have merged with every record, then enforces by itself; the hook says so once.
-# lc-gate enforcement shows where a count stands.
-gate_pr_only: default-branch              # the merge hook checks only a pull request into the default branch
+# `if <word>` or `after <word>` (read as the flags): quote it, e.g. bash -c 'terraform plan'.
+# Modes: off | observe (log and tell) | enforce (refuse).
 gate_pr_mode: enforce                     # the stage exit's records, at lc-gate merge, gh pr merge or git merge into the default branch
-gate_pr_plan: off                         # no step here ends in `plan`
 
 paths:                                    # globs separated by spaces; ** spans directories
   code: <globs of everything but prose, e.g. apps/** packages/** tools/** e2e/** **/package.json .github/** .agents/**>
@@ -97,13 +92,12 @@ paths:                                    # globs separated by spaces; ** spans 
   formal: <globs of the formal models and proofs and the code they map to, or delete the key>
 
 # No step here is the author's own word: each record comes from the runner, the host or a separate
-# session (lc-gate enforcement flags a `here` step in gate_pr). `if code` makes a docs-only pull
+# session. `if code` makes a docs-only pull
 # request (the docs sweep) N/A for every step but the host's checks and the rules.
 gate_pr:
   ci: checks                              # ci.required_checks on the pushed head; no CI host: drop it and each "ci" below
   rules: command lc-rules check --base $LC_GATE_BASE   # .agents/rules.yaml, judged by the base's copy; no CI host needed
-  regression: workflow <stage workflow file> if code       # the full regression run on the stage's head
-  integration: workflow <integration workflow file> if code   # delete the line where the stage run already holds the integration suite
+  regression: workflow <stage workflow file> if code       # the full regression and integration run on the stage's head
   acceptance: command <cmd> verify:acceptance if code after ci   # every criterion has a flow script (lc-criteria), and every flow script passes
   thermo-review: session docs/review/thermo-review.md if code after ci,acceptance    # bugs, breakage, security, developer setup, feature leaks
   thermo-quality: session docs/review/thermo-quality.md if code after ci,acceptance  # structure and maintainability, by the Thermos bar
@@ -115,8 +109,8 @@ merge:
 
 # The files that define the rules change only in a PR the owner reads. Globs; or a pointer `file#key`
 # to a list kept elsewhere. lc-gate enforcement names each rule file missing from it.
-owner_approval: [.agents/project.yaml, .agents/ci/**, .githooks/**, .github/workflows/**, docs/review/**, docs/stack-decisions.md, docs/stack-tools.md, docs/stack-exceptions.md]
-protected_files: [.agents/project.yaml, .agents/rules.yaml, .agents/rules-baseline.json, .agents/ci/**, .githooks/**, .github/workflows/**, docs/review/**, docs/stack-decisions.md, docs/stack-tools.md, docs/stack-exceptions.md]
+owner_approval: [.agents/project.yaml, .agents/ci/**, .github/workflows/**, docs/review/**, docs/stack-decisions.md, docs/stack-tools.md, docs/stack-exceptions.md]
+protected_files: [.agents/project.yaml, .agents/rules.yaml, .agents/rules-baseline.json, .agents/ci/**, .github/workflows/**, docs/review/**, docs/stack-decisions.md, docs/stack-tools.md, docs/stack-exceptions.md]
 pinned_files: []                          # change only when a plan schedules it
 
 lanes:
@@ -143,7 +137,7 @@ sessions:                                 # read by lc-spawn, lc-close, lc-view
   model: opus                             # owner sessions; pstack's own roles are in ~/.claude/rules/pstack-models.md (docs/machine.md)
   effort: medium
   gate_model: opus                        # the stage exit's review sessions; never the lead's LC_MODEL
-  gate_effort: medium
+  gate_effort: high                       # review runs one step above the build
   # gate_parallel: <n>                    # how many gate sessions lc-gate run starts at a time; unset: all at once
   # gate_setup: <cmd, e.g. pnpm install>  # run once in one worktree per gate candidate, where its sessions read; unset: each makes its own
   # gate_rounds: 2                        # follow-up reviews of a step that may end in FAIL before only the lead starts another

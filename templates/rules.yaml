@@ -10,7 +10,7 @@
 # correct skill) uses the real mistake as its red example, and points `decision` at its row in
 # the rule table of the agent instruction file.
 #
-# Four starter rules: uncomment one, point it at your decision and your paths, run selftest.
+# Five starter rules: uncomment one, point it at your decision and your paths, run selftest.
 rules:
 #   - id: http-client-owned
 #     decision: docs/decisions/0001-http-client.md
@@ -36,12 +36,21 @@ rules:
 #     except: [db/migrations/]
 #     red: { file: src/reports/totals.sql, text: "" }
 #     green: { file: db/migrations/0001_init.sql, text: "" }
-#   - id: no-new-comments
+#   - id: no-comments
 #     decision: AGENTS.md#rules
-#     message: Delete the comment. If it explains a workaround, fix the cause. If it states a constraint, encode it as a type, a test or a rule (pstack no-comments). Kept only - a doc comment on a public API, a licence header, a tool directive.
+#     message: Delete the comment. If it explains a workaround, fix the cause. If it states a constraint, encode it as a type, a test or a rule (pstack no-comments). If it documents an API, the name and the types say it. Only a tool directive stays.
 #     kind: text
-#     pattern: '(?:^|[ \t])(?://(?!/)|/\*(?![*!]))(?![ \t]*(?:eslint|prettier|biome|@ts-|c8 |v8 |istanbul ))'
-#     paths: ["src/**"]
-#     except: ["**/*.d.ts"]
+#     pattern: '(?:^|[ \t])(?://(?!/ <)|/\*)(?![ \t]*(?:eslint|prettier|biome|@ts-|c8 |v8 |istanbul |#region|#endregion))'
+#     paths: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs", "**/*.css", "**/*.scss", "**/*.go", "**/*.rs", "**/*.java", "**/*.kt", "**/*.swift", "**/*.c", "**/*.h", "**/*.cpp"]
+#     except: ["**/*.d.ts", "**/node_modules/**", "**/dist/**"]
 #     red: { file: src/orders/total.ts, text: "const total = sum(lines); // retry once, the API is flaky" }
-#     green: { file: src/orders/total.ts, text: "/** The order's total in cents, tax included. */ export const total = sum(lines);" }
+#     green: { file: src/orders/total.ts, text: "// eslint-disable-next-line no-restricted-syntax" }
+#   - id: no-comments-hash
+#     decision: AGENTS.md#rules
+#     message: Delete the comment. If it explains a workaround, fix the cause. If it states a constraint, encode it as a type, a test or a rule (pstack no-comments). Only a tool directive stays.
+#     kind: text
+#     pattern: '(?:^[ \t]*|[ \t]{2})#(?!!)(?![ \t]*(?:type:|noqa|pragma|pylint:|ruff:|mypy:|pyright:|fmt:|isort:|shellcheck |-\*-))'
+#     paths: ["**/*.py", "**/*.sh", "**/*.rb"]
+#     except: ["**/node_modules/**", "**/.venv/**"]
+#     red: { file: src/orders/total.py, text: "total = sum(lines)  # retry once, the API is flaky" }
+#     green: { file: src/orders/total.py, text: "import os  # noqa: F401" }

@@ -10,8 +10,9 @@ What a stage's pull requests add up to, before any of it reaches the default bra
 ## Run it
 
 1. **Ready.** Every pull request of the plan has merged into the stage branch with a verdict that covers what landed. Open the stage's pull request: `gh pr create --base <default branch> --head <stage branch>`, the body per `adlc-mode`'s Opening a PR, with each acceptance criterion and the flow script that decides it under `## Verification`.
-2. **Walk.** `lc-gate run pr <stage branch> --wait` until `lc-gate check pr <stage branch>` holds; it returns when a step changes. The checks that cost no model tokens run first: the host's checks, the rules, the regression and integration runs, and `acceptance`, which fails on a criterion no flow script names (`lc-criteria`) and on any flow script that fails. The review sessions start once the host's checks and `acceptance` pass.
+2. **Walk.** `lc-gate run pr <stage branch> --wait` until `lc-gate check pr <stage branch>` holds; it returns when a step changes. The checks that cost no model tokens run first: the host's checks, the rules, the regression run, and `acceptance`, which fails on a criterion no flow script names (`lc-criteria`) and on any flow script that fails. The review sessions start once the host's checks and `acceptance` pass.
 3. **Read** each findings file, and the cited lines of every finding, before deciding anything.
+4. **Synthesize**, as the Thermos plugin does after its two audits: one list of every finding of the three sessions, most serious first, duplicates merged. A finding two sessions raised independently weighs more; where they disagree, decide from the cited lines and say why. Post the list on the stage pull request as one comment, each finding with its session, severity and disposition. You change no session's verdict: a step still passes or fails by its own record.
 
 ## Findings
 
