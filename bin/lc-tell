@@ -8,6 +8,11 @@ set -uo pipefail
 . "$(dirname "$(readlink -f "$0")")/lc-lib.sh"
 to=$1
 line=${2//$'\n'/ }
+root=$(timeout 10 git rev-parse --show-toplevel 2>/dev/null || pwd)
+if [[ -z ${LC_TMUX_SESSION:-} && ! -f $root/.agents/project.yaml ]]; then
+  echo "lc-tell: no .agents/project.yaml in $root: run it inside the project's repository or one of its worktrees, or set LC_TMUX_SESSION; nothing was sent" >&2
+  exit 1
+fi
 lead=$(lc_conf "$PWD" lead)
 if [[ $to == lead ]]; then
   to=$lead
@@ -15,7 +20,6 @@ if [[ $to == lead ]]; then
 fi
 from=${LC_SESSION:-${lead:-lead}}
 session=${LC_TMUX_SESSION:-$(lc_conf "$PWD" tmux_session agents)}
-root=$(timeout 10 git rev-parse --show-toplevel 2>/dev/null || pwd)
 handoff=$(lc_get "$root" handoff_dir)
 dir=${handoff:-$root/.agents}
 mkdir -p "$dir"

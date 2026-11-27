@@ -384,7 +384,7 @@ function check(repo, flags) {
   let judges = [head];
   if (flags.base) {
     if (run(repo, ['cat-file', '-e', `${flags.base}^{commit}`]).status !== 0) die(`--base ${flags.base}: no such commit here`);
-    const base = { label: `the base ${flags.base.slice(0, 12)}'s rules`, rules: show(repo, flags.base, RULES), baseline: show(repo, flags.base, BASELINE) };
+    const base = { label: `the base ${/^[0-9a-f]{40}$/.test(flags.base) ? flags.base.slice(0, 12) : flags.base}'s rules`, rules: show(repo, flags.base, RULES), baseline: show(repo, flags.base, BASELINE) };
     const changed = [RULES, BASELINE].filter((p, n) => [base.rules, base.baseline][n] !== [head.rules, head.baseline][n]);
     if (changed.length) {
       console.log(`::warning::PROTECTED RULES CHANGE: ${changed.join(' ')}: judged by the base commit's copy and by this change's; the owner must read them before merging.`);

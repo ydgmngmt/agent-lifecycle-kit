@@ -555,3 +555,15 @@ test('--wait does not see a change in a failed command run again, and does not r
   assert.match(r.stdout, /--wait: nothing changed in 2s/, r.stdout + r.stderr);
   assert.equal(readFileSync(join(git('pwd'), 'state/gates/pr/feat/evidence/count'), 'utf8'), 'x\n');
 });
+
+test('lc-gate run refuses a checkout behind the pull request on the host, naming the host head', () => {
+  const { repo, lc, git } = project('handoff_dir: $STATE\ngate_pr:\n  check: command true\n');
+  git('git checkout -q -b feat && echo a > a.txt && git add a.txt && git commit -qm work');
+  const gh = fakeGh();
+  gh.set('view.json', JSON.stringify({ headRefOid: 'f'.repeat(40), baseRefName: 'main' }));
+  const out = lc(gh.env, 'run', 'pr', 'feat', '--base', 'main');
+  assert.equal(out.status, 1, out.stdout + out.stderr);
+  assert.match(out.stderr, /head on the host is ffffffffffff, but this checkout is at [0-9a-f]{12}: pull the branch/);
+  gh.set('view.json', JSON.stringify({ headRefOid: git('git rev-parse HEAD'), baseRefName: 'main' }));
+  assert.equal(lc(gh.env, 'run', 'pr', 'feat', '--base', 'main').status, 0);
+});
