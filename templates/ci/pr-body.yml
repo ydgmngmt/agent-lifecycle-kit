@@ -21,7 +21,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      # The kit at a pinned commit, the same one the phase check uses (templates/ci/pr.yml).
+      # The kit at a pinned commit, the same one templates/ci/pr.yml uses for the rules.
       - uses: actions/checkout@v4
         with:
           repository: <owner>/agent-lifecycle-kit

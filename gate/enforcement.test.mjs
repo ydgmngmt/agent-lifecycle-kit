@@ -288,34 +288,35 @@ test('a mode that is not off, observe, observe <n> or enforce is an error', () =
   assert.match(r.lc(['enforcement']).stdout + r.lc(['enforcement']).stderr, /gate_pr_mode is "observe two"/);
 });
 
-test('the project template: modes observe 3, no here step in gate_pr, the review after the checks, the stack hunt its own phase step', async () => {
+test('the project template: gate_pr is the stage exit, on the default branch only, scripts before the three review sessions', async () => {
   const { parseProject } = await import('../board/config.mjs');
   const { parseSteps } = await import('./gate.mjs');
   const conf = parseProject(readFileSync(join(KIT, 'templates/project.yaml'), 'utf8'));
-  assert.equal(conf.gate_pr_mode, 'observe 3');
-  assert.equal(conf.gate_pr_plan, 'observe 3');
+  assert.equal(conf.gate_pr_only, 'default-branch');
+  assert.equal(conf.gate_pr_mode, 'enforce');
+  assert.equal(conf.gate_pr_plan, 'off');
   const pr = parseSteps(conf, 'pr');
-  assert.deepEqual(pr.filter((s) => s.kind === 'here'), []);
+  assert.deepEqual(pr.filter((s) => s.kind === 'here' || s.kind === 'owner' || s.plan), []);
   assert.deepEqual(pr.find((s) => s.id === 'ci'), { id: 'ci', kind: 'checks', arg: '', if: null });
-  assert.deepEqual(pr.find((s) => s.id === 'live-check').after, ['ci']);
-  assert.deepEqual(pr.map((s) => s.id).slice(-3), ['ci', 'live-check', 'reviewer']);
+  assert.deepEqual(pr.map((s) => s.id), ['ci', 'rules', 'regression', 'integration', 'acceptance', 'thermo-review', 'thermo-quality', 'stack']);
+  const sessions = pr.filter((s) => s.kind === 'session');
+  assert.deepEqual(sessions.map((s) => s.arg), ['docs/review/thermo-review.md', 'docs/review/thermo-quality.md', 'docs/review/stack-hunt.md']);
+  for (const s of sessions) assert.deepEqual(s.after, ['ci', 'acceptance']);
+  assert.deepEqual(parseSteps(conf, 'phase'), []);
   assert.ok(!existsSync(join(KIT, 'templates/ci/pipeline-passed.mjs')));
-  assert.equal(pr.find((s) => s.id === 'tool-fit').plan, true);
-  assert.equal(parseSteps(conf, 'phase').find((s) => s.id === 'stack').arg, 'docs/review/stack-hunt.md');
   assert.equal(conf['ci.required_checks'], 'verify-pr pr-body');
+  assert.equal(conf['sessions.gate_effort'], 'medium');
 });
 
-// Every PR is reviewed against the checklist, by kind of diff: a prose-only diff included.
-test('the project template: the checklist reviews every PR against its brief first, and its first Docs item fails a false statement', async () => {
-  const { parseProject } = await import('../board/config.mjs');
-  const { parseSteps, questions } = await import('./gate.mjs');
-  const conf = parseProject(readFileSync(join(KIT, 'templates/project.yaml'), 'utf8'));
-  const pr = parseSteps(conf, 'pr');
-  assert.deepEqual(pr.find((s) => s.id === 'reviewer'), { id: 'reviewer', kind: 'session', arg: conf['docs.review_checklist'], if: null, after: ['ci', 'live-check'] });
-  assert.deepEqual(pr.filter((s) => /correctness/.test(s.arg)), []);
-  const qs = questions(readFileSync(join(KIT, 'templates/review/checklist.md'), 'utf8'));
-  assert.match(qs[0], /^\(P2\) Does the diff do everything its brief's "Done when" lines say/);
-  assert.match(qs[1], /^\(P2\) Is every statement the diff makes true/);
+// The Thermos audits answer per area of their rubric, and the rubric is the vendored upstream file.
+test('the Thermos question files: one question per area of the vendored rubric', async () => {
+  const { questions } = await import('./gate.mjs');
+  const review = questions(readFileSync(join(KIT, 'templates/review/thermo-review.md'), 'utf8'));
+  assert.equal(review.length, 5);
+  assert.match(review[0], /^\*\*Bugs\./);
+  const quality = questions(readFileSync(join(KIT, 'templates/review/thermo-quality.md'), 'utf8'));
+  assert.equal(quality.length, 7);
+  for (const f of ['thermo-nuclear-review', 'thermo-nuclear-code-quality-review']) assert.ok(existsSync(join(KIT, 'vendor/thermos', f, 'SKILL.md')));
 });
 
 test('enforcement: the checklist review must run on every PR', () => {
@@ -486,4 +487,46 @@ test('enforcement names keys the 1.8 upgrade drops, without failing on them', ()
   const after = run();
   assert.match(after.stdout, /note: gate\.run, merge\.candidate are no longer read; drop them from \.agents\/project\.yaml \(docs\/upgrading\.md, 1\.8\)/);
   assert.equal(after.status, before.status);
+});
+
+// 2.0: the stage exit. gate_pr judges only what enters the default branch; a PR into a stage branch
+// lands on the host's checks and its swarm verdict.
+test('gate_pr_only: default-branch: the merge hook lets a PR into a stage branch through and refuses one into main', () => {
+  const r = repoWith('handoff_dir: $STATE\ngate_pr_mode: enforce\ngate_pr_only: default-branch\ngate_pr:\n  thermo-review: session q.md\n', { layers: false });
+  const hook = (command) =>
+    spawnSync(process.execPath, [GATE, 'hook'], { cwd: r.repo, encoding: 'utf8', env: { ...process.env, LC_GATE_STEP: '', PATH: `${r.gh.dir}:/usr/bin:/bin` }, input: JSON.stringify({ tool_name: 'Bash', cwd: r.repo, tool_input: { command } }) });
+  r.git('git checkout -q -b pr-1 main && git commit -q --allow-empty -m work');
+  const head = r.git('git rev-parse HEAD');
+  r.gh.set('view.json', JSON.stringify({ headRefName: 'pr-1', headRefOid: head, baseRefName: 'stage/pay' }));
+  const staged = hook('gh pr merge pr-1 --squash');
+  assert.equal(staged.status, 0, staged.stderr);
+  assert.doesNotMatch(staged.stdout, /observe mode/);
+  r.gh.set('view.json', JSON.stringify({ headRefName: 'stage/pay', headRefOid: head, baseRefName: 'main' }));
+  const exit = hook('gh pr merge stage/pay');
+  assert.equal(exit.status, 2, exit.stdout);
+  assert.match(exit.stderr, /thermo-review/);
+});
+
+test('without gate_pr_only, a PR into another branch is still checked', () => {
+  const r = repoWith('handoff_dir: $STATE\ngate_pr_mode: enforce\ngate_pr:\n  review: session q.md\n', { layers: false });
+  r.git('git checkout -q -b pr-1 main && git commit -q --allow-empty -m work');
+  r.gh.set('view.json', JSON.stringify({ headRefName: 'pr-1', headRefOid: r.git('git rev-parse HEAD'), baseRefName: 'parent' }));
+  const out = spawnSync(process.execPath, [GATE, 'hook'], { cwd: r.repo, encoding: 'utf8', env: { ...process.env, LC_GATE_STEP: '', PATH: `${r.gh.dir}:/usr/bin:/bin` }, input: JSON.stringify({ tool_name: 'Bash', cwd: r.repo, tool_input: { command: 'gh pr merge pr-1' } }) });
+  assert.equal(out.status, 2, out.stdout);
+});
+
+test('enforcement: without a review checklist, any gate_pr session step is the review route', () => {
+  const r = repoWith('handoff_dir: $STATE\ngate_pr_mode: enforce\npaths:\n  code: src/**\ngate_pr:\n  thermo-review: session q.md if code\n', { layers: false });
+  assert.match(line(r.lc(['enforcement']).stdout, /^review\s/), /every gated PR reviewed: a session step.*\bon: gate_pr thermo-review/);
+  const none = repoWith('handoff_dir: $STATE\ngate_pr_mode: enforce\ngate_pr:\n  ci: command true\n', { layers: false });
+  assert.match(line(none.lc(['enforcement']).stdout, /^review\s/), /\boff: gate_pr has no session step/);
+});
+
+test('protect --branch: a stage branch gets the same required checks', () => {
+  const r = repoWith();
+  r.gh.set('api.err', 'gh: Branch not protected (HTTP 404)\n');
+  const out = r.lc(['protect', '--branch', 'stage/pay', '--yes']);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(r.gh.log(), /api -X PUT repos\/\{owner\}\/\{repo\}\/branches\/stage%2Fpay\/protection --input -/);
+  assert.match(out.stdout, /set: stage\/pay is protected/);
 });

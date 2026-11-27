@@ -82,3 +82,19 @@ Change the project file before updating the kit: a step line with `after-gate` i
 - **New keys:** `sessions.lead` (the orchestrator's window, for `lc-tell lead` and the board), `sessions.gate_flags` (docs/machine.md), `sessions.memory_floor_mb`.
 - **New commands:** `lc-tell`, `lc-log`, `lc-park` (run `./install.sh` again for their links) and `lc-gate tally`. The board shows the read-afterwards list and tells the lead each answer; drop the lead's own `lc-board answers --wait`.
 - `lc-gate enforcement` names `gate.run`, `ci.pr_checks` and `merge.candidate` when they are still in the project file.
+
+## From 1.9 to 2.0
+
+The kit is rebuilt on pstack. Read the [README](../README.md) and the `lifecycle` skill first: the flow changed, not only its keys.
+
+- **Install:** pstack (`pstack@cursor-plugins`) at the version `pstack.lock` pins; `lc-pstack check` says whether it is. From mattpocock-skills only `grilling` and `domain-modeling` are still used. Run `./install.sh` again: it links `lc-pstack` and `lc-criteria` and drops the links of the removed skills.
+- **Skills:** `implementer` and `pr-gate` are gone; `adlc-mode` (a fork of pstack's poteto-mode, [what differs](../skills/adlc-mode/DIVERGENCES.md)) builds and verifies every pull request by pstack's Autopilot-full. `orchestrator` is `lead`; `phase-exit` is `stage-exit`. A brief is now a kickoff (`templates/kickoff.md`) pointing at a section of the stage's plan file.
+- **Branches:** a stage (a phase of the roadmap) is built on its own branch (`stage.branch`). Pull requests land there; the stage branch's own pull request into the default branch is the stage exit.
+- **The gate:** `gate_pr:` is now the stage exit, with `gate_pr_only: default-branch`, `gate_pr_mode: enforce` and `gate_pr_plan: off`. Copy the block and `paths.code` from `templates/project.yaml`. Delete `gate_phase:`, `docs.phase_review`, `docs.phase_records`, `docs.review_checklist` and the `pr:` block; the per-PR `reviewer`, `tool-fit` and `live-check` steps are gone. There is no owner acceptance step.
+- **Per pull request:** nothing of `lc-gate`. The host's required checks (`lc-gate protect --branch <stage branch> --yes`) and the swarm's verdict land it, and its owner session merges it. `verify:pr` now runs the flow scripts that cover the diff.
+- **Question files:** recopy `thermo-review.md`, `thermo-quality.md`, `stack-hunt.md` and `tool-fit.md` from `templates/review/`; delete the checklist and the correctness, security, architecture, duplication, dead-code, built-as-described and docs files. The Thermos rubrics stay in the kit (`vendor/thermos/`).
+- **Verification:** the project needs a verification skill with flow scripts (pstack's create-verification-skill; checklist item 10a), each script naming the acceptance criteria it decides. New profiles `verify:acceptance` and `verify:stage` (was `verify:phase`); `templates/ci/phase.yml` is `stage.yml`. Optional: a formal verification skill and `templates/ci/formal.yml` (item 10b).
+- **CI:** the PR workflow no longer runs `lc-gate check phase --diff`; remove that step. It must run on pull requests into stage branches too.
+- **Models:** `sessions.model`/`effort` and `gate_model`/`gate_effort` are `opus`/`medium`; pstack's own roles are in `~/.claude/rules/pstack-models.md` ([machine](machine.md)).
+- **Codex:** pstack has no Codex version, so owner sessions and the lead run in Claude Code.
+- **Still in the code, no longer in the template:** `gate_phase:`, the `here` and `owner` kinds, planned steps and `lc-pr`. A project that keeps its 1.9 project file keeps working on them.

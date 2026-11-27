@@ -1,0 +1,50 @@
+# Stage profile: the regression run on the stage's head, started by lc-gate (the stage exit's `regression` step).
+# The profile writes its per-step logs and traces under $STAGE_OUT, and $STAGE_OUT/evidence.md.
+# lc-gate dispatches it with `-f candidate=<sha>` only and finds the run by the candidate in its run-name.
+name: Stage run
+run-name: Stage run at ${{ inputs.candidate }}
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Full SHA of the stage's head
+        required: true
+      stage:
+        description: Stage id (optional; lc-gate does not pass it)
+        required: false
+        default: ''
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  verify-stage:
+    runs-on: <runner labels>
+    timeout-minutes: <minutes>
+    env:
+      STAGE_OUT: ${{ github.workspace }}/.stage-run
+    steps:
+      - uses: actions/checkout@<pinned sha>
+        with:
+          ref: ${{ inputs.candidate }}
+          persist-credentials: false
+      - name: Candidate is the checked-out commit
+        env:
+          CANDIDATE: ${{ inputs.candidate }}
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE"
+      # <toolchain setup>
+      - name: verify:stage
+        run: <cmd> verify:stage
+      - name: Evidence as the run summary
+        if: always()
+        env:
+          STAGE: ${{ inputs.stage }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          { echo "## Stage ${STAGE:-run} at $CANDIDATE"; cat "$STAGE_OUT/evidence.md" 2>/dev/null || echo "No evidence.md: the run stopped before writing it."; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@<pinned sha>
+        if: always()
+        with:
+          name: stage-run-${{ inputs.candidate }}
+          path: .stage-run/

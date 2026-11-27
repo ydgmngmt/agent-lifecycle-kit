@@ -28,13 +28,16 @@
 //                       the plan on every Edit/Write and git commit, and no --no-verify while it applies
 //   lc-gate enforcement [--strict] [--md]
 //                       what makes each gate step binding here, layer by layer, and whether each is on
-//   lc-gate protect [--yes]   branch protection on the default branch from ci.required_checks
+//   lc-gate protect [--branch <name>] [--yes]   branch protection on the default branch, or on the named
+//                       one (a stage branch), from ci.required_checks
 //                       (gate/enforcement.mjs)
 //   lc-gate questions <file>  a question file's questions, Q1, Q2, …: the rows a session's findings answer
 //   lc-gate tally <phase|pr> [--since <date>] [--md]
 //                       per question of each session step: how often it applied, its P1, P2 and P3 rows,
 //                       over every findings file under the gates root
 //
+// gate_pr_only: default-branch limits the merge hook to pull requests into the default branch (the
+// stage exit); unset, every pull request is checked.
 // gate_pr_mode and gate_pr_plan are off, observe, enforce, or `observe <n>`: enforce once <n> PRs have
 // merged with every record. The hook and lc-gate merge mark each merge they let through:
 // gates/pr/<id>/merged.json.
@@ -1651,8 +1654,12 @@ function hook(_repo, _pos, _flags, stdin = readFileSync(0, 'utf8')) {
         head = git(repo, 'rev-parse', `${local ? 'refs/heads' : 'refs/remotes'}/${t}^{commit}`);
       } else {
         if (p.target?.dynamic) die(`can't tell which PR \`gh pr merge ${p.target.text}\` merges: the shell expands it`);
-        const view = exec('gh', ['pr', 'view', ...(p.target ? [p.target.text] : []), ...p.repo, '--json', 'headRefName,headRefOid'], { cwd: p.cwd, timeout: GH_TIMEOUT });
-        ({ headRefName: branch, headRefOid: head } = JSON.parse(view.stdout));
+        const view = exec('gh', ['pr', 'view', ...(p.target ? [p.target.text] : []), ...p.repo, '--json', 'headRefName,headRefOid,baseRefName'], { cwd: p.cwd, timeout: GH_TIMEOUT });
+        let into;
+        ({ headRefName: branch, headRefOid: head, baseRefName: into } = JSON.parse(view.stdout));
+        // gate_pr_only: default-branch: a PR into any other branch (a stage branch) lands on the
+        // host's required checks and its swarm verdict; this gate judges only what enters the default branch.
+        if (cfg.conf.gate_pr_only === 'default-branch' && into && !isMainBranch(repo, into)) continue;
         // The PR's head and main as the remote has them (an update-branch happens on the remote).
         fetchOrigin(repo);
       }
@@ -1702,7 +1709,7 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 // `lc-gate merge pr [branch]`: the one way a PR merges, one at a time (<gates>/merge.lock, with its
 // holder and time; a held lock is refused). A branch behind its base is updated on the host first (a
-// conflict stops it: the implementer merges main by hand, and the gate reviews the resolved lines).
+// conflict stops it: main is merged in by hand, and the gate reviews the resolved lines).
 // Then the gate's checks step is read on the head until the host's verdict is in (LC_GATE_MERGE_WAIT
 // seconds, 1800; every LC_GATE_MERGE_POLL, 15), every record must hold there as the merge hook checks
 // it, and gh merges exactly that head with the Verified-By trailer: never --admin, --auto, or a branch
@@ -1766,7 +1773,7 @@ async function mergeLocked(repo, cfg, steps, mode, branch) {
   const view = () => JSON.parse(exec('gh', ['pr', 'view', branch, '--json', 'number,headRefOid,headRefName,baseRefName,mergeStateStatus'], { cwd: repo, timeout: GH_TIMEOUT }).stdout);
   let pr = view();
   const id = branchId(pr.headRefName);
-  const byHand = `The implementer merges ${pr.baseRefName} into ${pr.headRefName} by hand (git merge, never a rebase) and pushes; the gate then reviews the hand-resolved lines (lc-gate run pr ${id}). Then lc-gate merge pr ${id} again.`;
+  const byHand = `Merge ${pr.baseRefName} into ${pr.headRefName} by hand (git merge, never a rebase) and pushes; the gate then reviews the hand-resolved lines (lc-gate run pr ${id}). Then lc-gate merge pr ${id} again.`;
   fetchOrigin(repo);
   if (pr.mergeStateStatus === 'DIRTY') die(`${pr.headRefName} conflicts with ${pr.baseRefName}; nothing merged. ${byHand}`);
   // Behind: as the host says, or as origin's copy of the base shows (the host says BEHIND only when

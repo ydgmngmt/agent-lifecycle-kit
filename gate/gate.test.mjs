@@ -484,12 +484,12 @@ test('lc-gate merge updates a behind branch, reads its checks on the new head, a
   assert.doesNotMatch(log, /--admin|--auto|--delete-branch/);
   assert.equal(JSON.parse(readFileSync(join(p.repo, 'state/gates/pr/feat/merged.json'), 'utf8')).complete, true);
   assert.ok(!existsSync(join(p.repo, 'state/gates/merge.lock')));
-  // A conflict: GitHub refuses the update, and the implementer merges main by hand.
+  // A conflict: GitHub refuses the update, and main is merged in by hand.
   const q = behind();
   q.gh.set('update.err', 'merge conflict between base and head (HTTP 422)\n');
   const c = q.merge();
   assert.equal(c.status, 1);
-  assert.match(c.stderr, /would not update feat from main .*merges main into feat by hand \(git merge, never a rebase\)/);
+  assert.match(c.stderr, /would not update feat from main .*Merge main into feat by hand \(git merge, never a rebase\)/);
   assert.doesNotMatch(q.gh.log(), /pr merge/);
 });
 

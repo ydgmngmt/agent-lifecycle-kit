@@ -185,9 +185,10 @@ function rows(repo) {
 
   // Every PR reviewed, a prose-only diff included: the checklist's session step with no `if` (by kind of diff).
   const list = c['docs.review_checklist']?.split('#')[0];
-  const reviewer = list && prSteps.find((s) => s.kind === 'session' && s.arg === list && !s.if);
-  add('review', 'every PR reviewed: the checklist session', BY.session, 'a false statement or a broken project rule, a prose-only diff included',
-    reviewer ? `on: gate_pr ${reviewer.id}, the checklist session` : `off: no gate_pr step without an \`if\` that is ${list ? `\`session ${list}\`` : 'the checklist session (set docs.review_checklist)'}`, prSteps.length > 0);
+  // Without a checklist (a stage exit's gate_pr): any session step, which never is the author.
+  const reviewer = list ? prSteps.find((s) => s.kind === 'session' && s.arg === list && !s.if) : prSteps.find((s) => s.kind === 'session');
+  add('review', list ? 'every PR reviewed: the checklist session' : 'every gated PR reviewed: a session step', BY.session, 'a false statement or a broken project rule, a prose-only diff included',
+    reviewer ? `on: gate_pr ${reviewer.id}${list ? ', the checklist session' : ''}` : `off: ${list ? `no gate_pr step without an \`if\` that is \`session ${list}\`` : 'gate_pr has no session step'}`, prSteps.length > 0);
 
   // The mechanical rules (lc-rules), once the project has a rules file: in CI, or as a gate_pr command
   // step, which binds without a CI host.
@@ -291,8 +292,8 @@ function planRefused(branch, msg) {
 export function protect(repo, _pos, flags) {
   const checks = words(loadConfig(repo).conf['ci.required_checks']);
   if (!checks.length) die('set ci.required_checks in .agents/project.yaml: the CI job names the default branch requires, separated by spaces');
-  const branch = defaultBranch(repo);
-  const path = `repos/{owner}/{repo}/branches/${branch}/protection`;
+  const branch = typeof flags.branch === 'string' && flags.branch ? flags.branch : defaultBranch(repo);
+  const path = `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}/protection`;
   const now = gh(repo, ['api', path]);
   if (now.plan) return planRefused(branch, now.error);
   if (now.error && !now.none) die(`can't read the protection of ${branch}: ${now.error}`);

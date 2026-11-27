@@ -1,12 +1,10 @@
-# Review: tool fit
+# Tool fit
 
-The PR gate's `tool-fit` step (`tool-fit: session <this file> if mechanism plan`). The author planned before any code (`pr-gate`); this session checks the plan against the diff, then hunts the diff for a chosen tool rebuilt under another name.
-
-Inputs: `docs.stack_decisions`, `docs.stack_tools` (each tool's functions and docs), `docs.stack_exceptions`, the plan record (`records/tool-fit.plan.json` and its evidence copy), the brief's **Stack fit**, the diff.
+What a pull request's `## Tool fit` section holds, and what counts as a new mechanism. The author writes the section from `docs.stack_decisions`, `docs.stack_tools` (each tool's functions and docs) and `docs.stack_exceptions`; CI's `pr-body` check reads its line shapes; the stage exit's stack review ([stack-hunt.md](stack-hunt.md)) reads past it.
 
 ## Accepted lines
 
-The plan, and the PR body's `## Tool fit` section (`pr_body`), hold only these. A completed line adds ` at <file:line>` after `<what>`.
+The PR body's `## Tool fit` section (`pr_body`) holds only these. A line adds ` at <file:line>` after `<what>` once the code exists.
 
 ```
 - I will call <function> (<docs page>) for <what>
@@ -20,11 +18,3 @@ A piece no chosen tool seems to fit: read that tool's current docs for the capab
 ## A new mechanism
 
 Anything the diff adds or widens of: a column or table holding work state (due times, polled flags, claims, leases, attempts, wakes); a background loop, timer or polling; a queue or retry; a dependency; a validator or schema format; an HTTP route or middleware; a cache; a package; a script that checks or generates; a signing, identity, secrets or telemetry path. Widening a mechanism that already deviates counts.
-
-## Questions
-
-1. **Plan against diff.** Does the diff make each plan line's call at its `file:line`, through the tool the stack decisions give that capability? Is every mechanism the diff adds covered by a line?
-2. **The hunt.** Ignoring the plan: a timer or sleep behind an alias, or a `setTimeout` that calls itself; a query or CLI spawned through a variable; a mechanism under a test or fixture folder that product code imports; a lease, queue, claim or wake table or column under another name; then any mechanism above, in whatever shape.
-3. **Owner.** For each mechanism found: which decision owns it, and which tool function replaces it?
-
-A finding names the mechanism at `path:line`, the decision it breaks and the replacing function. **Fail condition:** a mechanism no plan line, chosen tool or exception row covers.
