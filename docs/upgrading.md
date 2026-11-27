@@ -98,3 +98,5 @@ The kit is rebuilt on pstack. Read the [README](../README.md) and the `lifecycle
 - **Models:** `sessions.model`/`effort` and `gate_model`/`gate_effort` are `opus`/`medium`; pstack's own roles are in `~/.claude/rules/pstack-models.md` ([machine](machine.md)).
 - **Codex:** pstack has no Codex version, so owner sessions and the lead run in Claude Code.
 - **Still in the code, no longer in the template:** `gate_phase:`, the `here` and `owner` kinds, planned steps and `lc-pr`. A project that keeps its 1.9 project file keeps working on them.
+- **Corrections become checks:** a failed verdict or a stage-exit finding is fixed and made impossible in the same pull request (pstack's correct), and the agent instruction file gets a rule table. Copy the `no-new-comments` starter rule from `templates/rules.yaml`, run `lc-rules baseline`, and add a burn-down pull request to each stage's plan.
+- **More verification:** checklist items 10b (TLA+ models and Lean proofs) and 10c (property-based UI tests, run by `verify:acceptance` and `verify:nightly`). Pull requests link their artifacts under `## Verification`.

@@ -7,7 +7,7 @@
 name: <project name>
 
 docs:
-  agents: AGENTS.md                       # operating model and invariants
+  agents: AGENTS.md                       # operating model, invariants, and the rule table: each rule with what enforces it
   product: <product doc>                  # what is built and why
   stories: <user stories>
   journeys: <user journeys>
@@ -19,7 +19,7 @@ docs:
   orchestration: docs/agents/orchestration.md
   testing: TESTING.md
   verification: .claude/skills/verify-<app>/   # the project's verification skill (pstack create-verification-skill): launch, drive, flow scripts, feature map
-  formal: <the project's formal verification skill (pstack create-formal-verification-skill), or none>
+  formal: <the project's formal verification skill (pstack create-formal-verification-skill): TLA+ models, Lean proofs; or none>
   code_map: docs/agents/code-map.md       # which module owns which concept
   stack_decisions: docs/stack-decisions.md   # which tool owns which capability (templates/review/stack-decisions.md)
   stack_tools: docs/stack-tools.md        # each tool's functions and documentation lookups (templates/review/stack-tools.md)
@@ -51,7 +51,7 @@ update_docs:
 profiles:                                 # one entry point per moment; CI calls pr and nightly
   commit: <cmd> verify:commit             # before each push: typecheck + specs covering changed files
   pr: <cmd> verify:pr                     # what PR CI runs: build, typecheck, tests, and the flow scripts covering the diff
-  acceptance: <cmd> verify:acceptance     # the stage exit: lc-criteria <the stage's acceptance file> <flow script folder>, then every flow script
+  acceptance: <cmd> verify:acceptance     # the stage exit: lc-criteria <the stage's acceptance file> <flow script folder>, then every flow script and the property-based UI tests
   stage: <cmd> verify:stage               # the stage exit's regression run, in order
   nightly: <cmd> verify:nightly           # full suite on main
 
@@ -94,7 +94,7 @@ paths:                                    # globs separated by spaces; ** spans 
   code: <globs of everything but prose, e.g. apps/** packages/** tools/** e2e/** **/package.json .github/** .agents/**>
   sensitive: <globs of the sensitive code paths: a brief touching them is proposed as rigor: critical>
   mechanism: <globs where a new mechanism can land, e.g. apps/** packages/** tools/** **/package.json>
-  formal: <globs of the formal model and the code it maps to, or delete the key>
+  formal: <globs of the formal models and proofs and the code they map to, or delete the key>
 
 # No step here is the author's own word: each record comes from the runner, the host or a separate
 # session (lc-gate enforcement flags a `here` step in gate_pr). `if code` makes a docs-only pull

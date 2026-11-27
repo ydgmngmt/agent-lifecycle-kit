@@ -69,6 +69,8 @@ Say plainly which part the host enforces (required checks on the stage branch an
 | Leading a stage | `lead`, `adlc-mode` | Autopilot-full, **swarm**, **ketchup**, Babysit |
 | Building a pull request | `adlc-mode` | Feature, Bug fix, Refactoring, Perf issue, Opening a PR; **architect**, **statechart**, **tdd**, **no-comments**, the principles |
 | Proving it live | the project's `verify-<app>` | **create-verification-skill**, **maintain-verification-skill** |
+| A correction | `adlc-mode` | **correct**, **no-comments**; `lc-rules` |
+| A model or a proof | the project's formal verification skill | **statechart**, **create-formal-verification-skill**, **maintain-formal-verification-skill** |
 | Stage exit | `stage-exit`, `review` | Thermos (vendored rubrics), the kit's stack hunt |
 | A critical brief | `adlc-mode` | **arena**, **interrogate** |
 | New repository | `bootstrap` | **setup-pstack**, **create-verification-skill**, **create-formal-verification-skill** |

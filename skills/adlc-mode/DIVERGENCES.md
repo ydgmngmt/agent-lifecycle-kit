@@ -9,13 +9,15 @@ The rule for a change: pstack is used as written unless the owner decided otherw
 | `SKILL.md` | Name, description, and where pstack's files are (`lc-pstack path`); whoever is told to read poteto-mode reads this file | It lives in the kit, not beside pstack's skills |
 | `SKILL.md` | arena and interrogate only for a kickoff marked `rigor: critical`; this overrides the skills and playbooks that route to them | Owner's decision: bake-offs only for very complex or critical work, confirmed on the board |
 | `SKILL.md` | A statechart during design when a state machine or concurrent protocol changes; the project's formal verification skill kept in step | Owner's decision: formal verification where feasible. Upstream only offers it |
+| `SKILL.md` | A correction runs **correct** in the same fix, into `lc-rules` and the rule table; no comments in new code; a proof for an algorithm with a property over every input; properties for a changed screen | Owner's decision after the author's talk "All Code Is Slop (Except Mine)": every correction becomes a deterministic check. Upstream leaves `/correct` to the operator |
+| `SKILL.md` | "Always pause" covers a change that loosens a `protected_files` file | The kit's rule: rule files change only in a PR the owner reads; adding a rule must not wait |
+| `playbooks/opening-a-pr.md` | `## Verification` links the artifacts: recording or screenshot, statechart, proof output | Owner's decision: review by artifacts, as the talk describes |
 | `SKILL.md` | Trunk is the stage branch; only the stage exit merges into the default branch | The kit's stage exit gates the default branch |
 | `SKILL.md` | A control skill is the project's verification skill, its flow scripts first | `control-ui` and `control-cli` are Cursor's; scripts cost no model tokens on a green run |
 | `SKILL.md` | deslop is read from the kit's vendored copy | `cursor-team-kit` is not installable in Claude Code |
 | `SKILL.md` | `/loop` is Claude Code's; the owner is asked on the board | Cursor's loop and question tool don't exist here; an open dialog stops the watchdog |
 | `SKILL.md` | show-me-your-work's cross-model review of the trail only when critical | A second vendor is not available in Claude Code, and it is a panel seat |
 | `SKILL.md` | The swarm's audit lane runs on the `judgment and prose` model | Owner's decision: scripts on Sonnet, judgement on Opus |
-| `SKILL.md` | A change to a `protected_files` file is added to "always pause" | The kit's rule: rule files change only in a PR the owner reads |
 | `playbooks/feature.md` | Step 2 names the statechart; step 4's arena and step 7's interrogate only when critical | As above |
 | `playbooks/autopilot-full.md` | PR owners are `lc-spawn` sessions that report with `lc-tell`; the trail lives in `handoff_dir` | Cursor cloud agents don't exist here; a tmux session is the closest thing that outlives the lead |
 | `playbooks/autopilot-full.md` | A full swarm is two named lanes (run, audit); the verdict is posted on the PR | Owner's decision on lanes and models; the comment is pstack's own Shipping rule |

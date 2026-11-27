@@ -26,9 +26,9 @@ One real product was built by agents that had a plan, an architecture and writte
 | PR exit | The host's required checks, then a swarm of verifiers that wrote none of the code. The owner session merges only what both cleared. | An agent cannot call its own work good. |
 | Nightly | The full test run on the default branch. | Slow checks still run without holding up every change. |
 | Stage exit | Scripts first, then the Thermos audits and the stack review on the whole stage. Each step leaves a record tied to the commit; no record, no merge. | Some defects only show where changes meet, and structure is judged best across a whole stage. |
-| Lessons | A finding the reviews keep raising becomes an exact rule; the owner decides. | The checks get stricter with use. |
+| Corrections | Every correction (a failed verdict, a review finding, the owner's word) is fixed and then made impossible: architecture, types, a rule whose error names the fix, a test. New code carries no comments. | The codebase is the largest input an agent reads, so it has to hold the rules itself. |
 
-Bake-offs between several designs (pstack's arena and interrogate) run only for a brief the owner marked critical. State machines and concurrent protocols get a model checked by TLC during design.
+Bake-offs between several designs (pstack's arena and interrogate) run only for a brief the owner marked critical. State machines and concurrent protocols get a model checked by TLC during design, algorithms with a property over every input get a proof (Lean), and screens get property-based tests.
 
 ## Install
 

@@ -23,6 +23,10 @@ The remaining triggers live only here:
 - Code → name the data shape first. Across a function boundary → **architect**. Fan-out → **swarm**.
 - **arena** and **interrogate** run only when your kickoff says `rigor: critical`. This overrides every skill and playbook that sends you to either one (architect, blast-radius, figure-it-out, eval, Feature). Without it, sketch the shapes yourself, pick one, and say why. If the work turns out to need a bake-off, tell the lead (`lc-tell lead`). The lead asks the owner on the board with a cost estimate. Never upgrade yourself.
 - A state machine or a concurrent protocol added or changed (ordering, retries, locks, leases, lifecycle states) → **statechart** during design, before a delegate writes logic. Replay each bug path against the code. Where the project has a formal verification skill, follow it and update its model in the same PR.
+- A correction → **correct**, in the same fix. A correction is the lead's `ISSUES` or `FAIL`, a stage-exit finding, the owner's word, or a mistake you see for the second time. Fix the mistake, then make it impossible at the highest level that works: architecture, then types, then a rule in `.agents/rules.yaml` (`lc-rules`) or the project's linter whose message names the fix and whose red example is the real mistake, then a test, and prose last. Add its row to the rule table in the agent instruction file (`docs.agents`): the rule, and what enforces it. A rule already in the table with nothing enforcing it is a repeat: enforce it in the same change. The owner reads the change to the rule files in your pull request; you do not wait for a decision first.
+- Comments → none in new code. Where the project has the comment rule, it refuses them; **no-comments** removes what is there and offers to encode a constraint comment as a type, a test or a rule.
+- An algorithm whose correctness is a property over every input (layout and virtualization arithmetic, money, parsers, merge and ordering functions) → a proof or code-level check per the project's formal verification skill (`docs.formal`; Lean where the project chose it), in the same pull request.
+- A screen added or changed → its properties in the project's property-based UI tests (`docs.testing`): what must hold whatever the user does next.
 - Trunk, wherever a playbook says it → the stage branch (`stage.branch`), never the default branch. Only the stage exit merges into the default branch.
 - A control skill, wherever a playbook names one → the project's verification skill (`verify-<app>` in `.claude/skills/`, `docs.testing`). Run its flow scripts first. Drive by hand only where no script reaches, then add the script.
 - Cursor's `/loop` → Claude Code's `/loop`. A question only the owner can answer → `lc-board ask` (the `board` skill), never a dialog left open.
@@ -80,7 +84,7 @@ Read the leaf skill in full for any principle you apply. Each entry names when i
 
 **Just do it.** Use any MCP tool. Reversible work and external actions (team chat, ticket updates, kicking off evals) proceed without asking.
 
-**Always pause** for irreversible writes: force-push to shared branches, deploys, data deletion, customer messages, and a change to a file in `protected_files`.
+**Always pause** for irreversible writes: force-push to shared branches, deploys, data deletion, customer messages, and a change that loosens a file in `protected_files` (a removed or weakened rule, a grown baseline, a dropped gate step). Adding a rule or shrinking the baseline is not loosening.
 
 **Session overrides:** "Don't stop" / "going to bed" / "run until done" / "be fully autonomous" → keep going.
 

@@ -5,7 +5,12 @@
 # CI runs `lc-rules check --base <base>`: the base commit's copy of this file and the baseline judge.
 # Both files are protected_files. Kinds: import, dependency, text, path (see rules/rules.mjs).
 #
-# Three starter rules: uncomment one, point it at your decision and your paths, run selftest.
+# A rule's message names the fix: the file, type or function to use instead, so the next agent
+# repairs the cause and does not work around the rule. A rule born from a correction (pstack's
+# correct skill) uses the real mistake as its red example, and points `decision` at its row in
+# the rule table of the agent instruction file.
+#
+# Four starter rules: uncomment one, point it at your decision and your paths, run selftest.
 rules:
 #   - id: http-client-owned
 #     decision: docs/decisions/0001-http-client.md
@@ -31,3 +36,12 @@ rules:
 #     except: [db/migrations/]
 #     red: { file: src/reports/totals.sql, text: "" }
 #     green: { file: db/migrations/0001_init.sql, text: "" }
+#   - id: no-new-comments
+#     decision: AGENTS.md#rules
+#     message: Delete the comment. If it explains a workaround, fix the cause. If it states a constraint, encode it as a type, a test or a rule (pstack no-comments). Kept only - a doc comment on a public API, a licence header, a tool directive.
+#     kind: text
+#     pattern: '(?:^|[ \t])(?://(?!/)|/\*(?![*!]))(?![ \t]*(?:eslint|prettier|biome|@ts-|c8 |v8 |istanbul ))'
+#     paths: ["src/**"]
+#     except: ["**/*.d.ts"]
+#     red: { file: src/orders/total.ts, text: "const total = sum(lines); // retry once, the API is flaky" }
+#     green: { file: src/orders/total.ts, text: "/** The order's total in cents, tax included. */ export const total = sum(lines);" }

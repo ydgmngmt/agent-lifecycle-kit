@@ -17,7 +17,7 @@ What a stage's pull requests add up to, before any of it reaches the default bra
 
 A session's step fails on a P1 or P2 ([finding.md](../lifecycle/finding.md)). The Thermos question files map its bar onto those: its high and medium findings, and each of its presumptive blockers that nobody justified.
 
-- **A blocking finding** goes back to the build: a fix pull request into the stage branch, by the owner session that built the code if it still runs, else a fresh one, through `adlc-mode` (Bug fix), verified by the playbook's sizing rule. The new head makes the session records stale, and each follow-up review starts by itself and reads only the change since.
+- **A blocking finding** goes back to the build: a fix pull request into the stage branch, by the owner session that built the code if it still runs, else a fresh one, through `adlc-mode` (Bug fix), verified by the playbook's sizing rule. It is a correction: the same pull request makes the mistake impossible (pstack's **correct**), so no later stage meets it again. The new head makes the session records stale, and each follow-up review starts by itself and reads only the change since.
 - **A presumptive blocker the builder can justify:** the justification goes on the stage pull request as a comment, in one or two lines a reader can check. Then `lc-gate run pr <stage branch> --rerun <step> --lead --reason "<the justification>"`. The session decides; you never record its pass.
 - **Everything else** (P3) is fixed where it is a few lines, else it becomes a follow-up in the roadmap. It never holds the stage.
 - A P1 is fixed, or accepted by the owner on the board, before anything else.
@@ -35,5 +35,5 @@ None of this holds the stage or starts a review again.
 - Mark the stage done in `docs.roadmap`, with the merge commit.
 - **Docs sweep** (`update-docs`): its own docs-only pull request into the default branch. The gate's `if code` steps are N/A for it.
 - **Verification upkeep:** pstack's **maintain-verification-skill** when the stage changed how the app is launched or driven, and **maintain-formal-verification-skill** when it touched code a formal check covers. Each in its own change.
-- **Lessons:** `lc-gate tally pr --since <stage start> --md`. A finding the reviews raised in two or more stages, that a diff can decide exactly, is proposed as a rule in `.agents/rules.yaml` (pstack's **correct** skill has the order: structure before prose). Each P1 or P2 names the pull request whose swarm passed it. The owner decides.
+- **Lessons:** each correction already became a check in its fix. Here, run pstack's **correct** once over the whole stage (its commits, reverts, verdicts and findings) for the classes no single fix saw, and read the rule table in the agent instruction file: a rule nothing enforces gets an enforcer or is dropped. `lc-gate tally pr --since <stage start> --md` shows which review questions caught what; each P1 or P2 names the pull request whose swarm passed it. The next stage's burn-down pull request takes the largest baseline.
 - Close the sessions, remove the worktrees, delete the stage branch.
